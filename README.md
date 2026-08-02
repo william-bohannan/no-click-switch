@@ -53,7 +53,7 @@ You can also use **Uninstall** from the app’s ☰ menu.
 - Temps via LibreHardwareMonitor (GPU row only if a sensor is found)
 - **Menu (☰)** (hover to open):
   - **Settings** → customization (left nav + right form)
-  - **Upgrade to x.y.z** (only when a newer GitHub release exists) — runs the install script and restarts
+  - **Upgrade to x.y.z** (only when a newer GitHub release exists) — downloads the GitHub release zip in-app and restarts (no remote PowerShell). Unsigned builds may still trigger SmartScreen; use **More info → Run anyway** if you trust the project.
   - **Install** / **Uninstall**
   - App name, version, **GitHub**, **Website**
   - **Close**

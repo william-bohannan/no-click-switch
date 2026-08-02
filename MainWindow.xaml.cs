@@ -1833,13 +1833,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void MenuUpgrade_Click(object sender, RoutedEventArgs e)
+    private async void MenuUpgrade_Click(object sender, RoutedEventArgs e)
     {
         var remote = AppUpdateChecker.AvailableVersion ?? "latest";
         var result = MessageBox.Show(
             $"Upgrade {AppInstaller.DisplayName} to {remote}?\n\n" +
-            "This downloads the latest release, replaces the installed app, and restarts NCS.\n" +
-            $"(Current version: {AppInstaller.VersionString})",
+            "This downloads the official GitHub release zip into a temp folder, " +
+            "then replaces the installed app and restarts.\n\n" +
+            $"(Current version: {AppInstaller.VersionString})\n\n" +
+            "Note: Windows SmartScreen may still warn about an unsigned app — " +
+            "choose More info → Run anyway if you trust this project.",
             "Upgrade",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -1847,25 +1850,41 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (result != MessageBoxResult.Yes)
             return;
 
-        if (!AppUpdateChecker.StartUpgrade())
+        // Disable double-clicks while downloading.
+        if (sender is MenuItem mi)
+            mi.IsEnabled = false;
+
+        try
+        {
+            var progress = new Progress<string>(msg =>
+            {
+                // Best-effort status via menu tooltip while download runs.
+                if (MenuUpgrade is not null)
+                    MenuUpgrade.ToolTip = msg;
+            });
+
+            await AppUpdateChecker.StartUpgradeAsync(progress).ConfigureAwait(true);
+            // App shuts down when staging succeeds.
+        }
+        catch (Exception ex)
         {
             MessageBox.Show(
-                "Could not start the upgrade.\n\n" +
-                "You can upgrade manually with:\n" +
-                "  irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex",
+                "Upgrade failed.\n\n" +
+                $"{ex.Message}\n\n" +
+                "Manual install (if needed):\n" +
+                "1) Download NoClickSwitch-win-x64.zip from GitHub Releases\n" +
+                "2) Extract over %LocalAppData%\\NoClickSwitch\n" +
+                "   or run install.ps1 from the repo README.\n\n" +
+                "If Windows blocked the download, check Defender protection history " +
+                "and allow No Click Switch / the zip from github.com.",
                 AppInstaller.DisplayName,
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
-            return;
-        }
 
-        // Installer stops this process; if it doesn't, leave a note.
-        MessageBox.Show(
-            "Upgrade started in PowerShell.\n\n" +
-            "NCS will close and relaunch when the install finishes.",
-            AppInstaller.DisplayName,
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+            if (sender is MenuItem mi2)
+                mi2.IsEnabled = true;
+            RefreshAppMenu();
+        }
     }
 
     private void MenuClose_Click(object sender, RoutedEventArgs e)

@@ -1,17 +1,24 @@
 using System.Diagnostics;
+using System.IO;
+using System.IO.Compression;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Threading;
 
 namespace NoClickSwitch;
 
 /// <summary>
-/// Checks GitHub Releases for a newer version than the running app.
+/// Checks GitHub Releases for a newer version and applies updates without
+/// remote script execution (avoids Defender flagging <c>irm | iex</c>).
 /// </summary>
 internal static class AppUpdateChecker
 {
-    private static readonly HttpClient Http = CreateClient();
+    private const string RepoApiLatest =
+        "https://api.github.com/repos/william-bohannan/no-click-switch/releases/latest";
+
+    private static readonly HttpClient Http = CreateClient(TimeSpan.FromSeconds(15));
     private static readonly object Gate = new();
     private static DateTime _lastCheckUtc = DateTime.MinValue;
     private static bool _checking;
@@ -21,6 +28,11 @@ internal static class AppUpdateChecker
 
     /// <summary>Release tag (e.g. v1.2.0).</summary>
     public static string? AvailableTag { get; private set; }
+
+    /// <summary>Direct browser download URL for the win-x64 zip asset.</summary>
+    public static string? AvailableDownloadUrl { get; private set; }
+
+    public static string? AvailableAssetName { get; private set; }
 
     public static bool IsUpdateAvailable
     {
@@ -34,9 +46,9 @@ internal static class AppUpdateChecker
 
     public static event EventHandler? Changed;
 
-    private static HttpClient CreateClient()
+    private static HttpClient CreateClient(TimeSpan timeout)
     {
-        var c = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+        var c = new HttpClient { Timeout = timeout };
         c.DefaultRequestHeaders.UserAgent.ParseAdd($"{AppInstaller.AppName}/{AppInstaller.VersionString}");
         c.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return c;
@@ -92,15 +104,15 @@ internal static class AppUpdateChecker
 
     public static async Task CheckAsync()
     {
-        // https://api.github.com/repos/william-bohannan/no-click-switch/releases/latest
-        var url = "https://api.github.com/repos/william-bohannan/no-click-switch/releases/latest";
-        using var response = await Http.GetAsync(url).ConfigureAwait(false);
+        using var response = await Http.GetAsync(RepoApiLatest).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             return;
 
         await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
         using var doc = await JsonDocument.ParseAsync(stream).ConfigureAwait(false);
-        if (!doc.RootElement.TryGetProperty("tag_name", out var tagEl))
+        var root = doc.RootElement;
+
+        if (!root.TryGetProperty("tag_name", out var tagEl))
             return;
 
         var tag = tagEl.GetString()?.Trim();
@@ -111,10 +123,38 @@ internal static class AppUpdateChecker
         if (string.IsNullOrEmpty(version))
             return;
 
+        string? downloadUrl = null;
+        string? assetName = null;
+        if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var asset in assets.EnumerateArray())
+            {
+                var name = asset.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // Prefer win-x64 / NoClickSwitch zip names (same as install.ps1).
+                var preferred = name.Contains("win-x64", StringComparison.OrdinalIgnoreCase)
+                                || name.Contains("NoClickSwitch", StringComparison.OrdinalIgnoreCase);
+                if (!preferred && downloadUrl is not null)
+                    continue;
+
+                if (asset.TryGetProperty("browser_download_url", out var urlEl))
+                {
+                    downloadUrl = urlEl.GetString();
+                    assetName = name;
+                    if (preferred)
+                        break;
+                }
+            }
+        }
+
         lock (Gate)
         {
             AvailableTag = tag.StartsWith('v') || tag.StartsWith('V') ? tag : "v" + tag;
             AvailableVersion = version;
+            AvailableDownloadUrl = downloadUrl;
+            AvailableAssetName = assetName;
         }
     }
 
@@ -123,7 +163,6 @@ internal static class AppUpdateChecker
         var s = tagOrVersion.Trim();
         if (s.StartsWith('v') || s.StartsWith('V'))
             s = s[1..];
-        // strip pre-release / build metadata for comparison base
         var plus = s.IndexOf('+');
         if (plus >= 0)
             s = s[..plus];
@@ -146,7 +185,6 @@ internal static class AppUpdateChecker
 
     private static string PadVersion(string v)
     {
-        // System.Version wants at least Major.Minor
         var parts = v.Split('.');
         if (parts.Length == 1)
             return v + ".0";
@@ -154,28 +192,129 @@ internal static class AppUpdateChecker
     }
 
     /// <summary>
-    /// Runs the official install.ps1 (downloads latest release, installs to LocalAppData, restarts).
-    /// Current process is stopped by the installer.
+    /// Download the release zip in-process, stage files, then run a local CMD helper
+    /// to replace the install after this process exits and relaunch.
+    /// Does <b>not</b> use remote PowerShell (<c>irm | iex</c>), which Defender often blocks.
     /// </summary>
-    public static bool StartUpgrade()
+    public static async Task StartUpgradeAsync(IProgress<string>? progress = null, CancellationToken ct = default)
     {
-        try
-        {
-            // Same one-liner as README install — always pulls latest main install.ps1 + latest release zip.
-            const string cmd =
-                "irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex";
+        progress?.Report("Checking latest release…");
+        if (string.IsNullOrWhiteSpace(AvailableDownloadUrl))
+            await CheckAsync().ConfigureAwait(false);
 
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{cmd}\"",
-                UseShellExecute = true,
-            });
-            return true;
-        }
-        catch
+        string? downloadUrl;
+        string? tag;
+        lock (Gate)
         {
-            return false;
+            downloadUrl = AvailableDownloadUrl;
+            tag = AvailableTag;
         }
+
+        if (string.IsNullOrWhiteSpace(downloadUrl))
+            throw new InvalidOperationException(
+                "No download URL found for the latest release. " +
+                "Open the Releases page on GitHub and install manually.");
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), "NoClickSwitch-update");
+        Directory.CreateDirectory(tempRoot);
+        var zipPath = Path.Combine(tempRoot, "NoClickSwitch-win-x64.zip");
+        var extractDir = Path.Combine(tempRoot, "extract-" + Guid.NewGuid().ToString("N"));
+        var applyCmd = Path.Combine(tempRoot, "apply-update.cmd");
+
+        progress?.Report($"Downloading {tag ?? "latest"}…");
+        using (var dl = CreateClient(TimeSpan.FromMinutes(15)))
+        {
+            // browser_download_url is a normal HTTPS file URL (not the API).
+            using var response = await dl.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct)
+                .ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            await using var net = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            await using var file = File.Create(zipPath);
+            await net.CopyToAsync(file, ct).ConfigureAwait(false);
+        }
+
+        progress?.Report("Extracting package…");
+        if (Directory.Exists(extractDir))
+            Directory.Delete(extractDir, recursive: true);
+        ZipFile.ExtractToDirectory(zipPath, extractDir);
+
+        // Support flat zip or single top-level folder.
+        var sourceDir = extractDir;
+        var children = Directory.GetFileSystemEntries(extractDir);
+        if (children.Length == 1 && Directory.Exists(children[0]))
+            sourceDir = children[0];
+
+        var stagedExe = Path.Combine(sourceDir, $"{AppInstaller.AppName}.exe");
+        if (!File.Exists(stagedExe))
+            throw new InvalidOperationException(
+                $"The download did not contain {AppInstaller.AppName}.exe.");
+
+        var installDir = AppInstaller.InstallDirectory;
+        var installedExe = AppInstaller.InstalledExePath;
+        var pid = Environment.ProcessId;
+
+        progress?.Report("Preparing updater…");
+        // Local batch only — no network, no PowerShell. Waits for us to exit, then copies + restarts.
+        var cmd = new StringBuilder();
+        cmd.AppendLine("@echo off");
+        cmd.AppendLine("setlocal");
+        cmd.AppendLine("title No Click Switch Update");
+        cmd.AppendLine("echo.");
+        cmd.AppendLine("echo   No Click Switch — applying update...");
+        cmd.AppendLine("echo.");
+        cmd.AppendLine($":wait");
+        cmd.AppendLine($"tasklist /FI \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul");
+        cmd.AppendLine("if not errorlevel 1 (");
+        cmd.AppendLine("  timeout /t 1 /nobreak >nul");
+        cmd.AppendLine("  goto wait");
+        cmd.AppendLine(")");
+        cmd.AppendLine("timeout /t 1 /nobreak >nul");
+        cmd.AppendLine($"if not exist \"{installDir}\" mkdir \"{installDir}\"");
+        // /E copy tree, /Y overwrite, /I assume dest is directory, /Q quiet
+        cmd.AppendLine($"xcopy /E /Y /I /Q \"{sourceDir}\\*\" \"{installDir}\\\" >nul");
+        if (!File.Exists(Path.Combine(installDir, $"{AppInstaller.AppName}.exe")))
+        {
+            // still write check in script
+        }
+
+        cmd.AppendLine($"if not exist \"{installedExe}\" (");
+        cmd.AppendLine("  echo   Update failed: exe missing after copy.");
+        cmd.AppendLine("  pause");
+        cmd.AppendLine("  exit /b 1");
+        cmd.AppendLine(")");
+        cmd.AppendLine(
+            $"reg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v {AppInstaller.AppName} /t REG_SZ /d \"\\\"{installedExe}\\\"\" /f >nul");
+        cmd.AppendLine($"start \"\" \"{installedExe}\"");
+        cmd.AppendLine($"rd /s /q \"{extractDir}\" 2>nul");
+        cmd.AppendLine($"del /f /q \"{zipPath}\" 2>nul");
+        cmd.AppendLine("echo   Update complete.");
+        cmd.AppendLine("timeout /t 2 /nobreak >nul");
+        cmd.AppendLine("del /f /q \"%~f0\" 2>nul");
+
+        await File.WriteAllTextAsync(applyCmd, cmd.ToString(), Encoding.ASCII, ct).ConfigureAwait(false);
+
+        progress?.Report("Restarting to finish update…");
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = applyCmd,
+            WorkingDirectory = tempRoot,
+            UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Normal,
+        });
+
+        // Allow updater to replace files.
+        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            try
+            {
+                BarCoordinator.Instance.Shutdown();
+            }
+            catch
+            {
+                // best-effort
+            }
+
+            System.Windows.Application.Current.Shutdown();
+        });
     }
 }
