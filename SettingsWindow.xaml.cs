@@ -434,7 +434,7 @@ public partial class SettingsWindow : Window
         {
             MessageBox.Show(
                 this,
-                "Could not start the install PowerShell window.\n\n" +
+                "Could not start the install helper.\n\n" +
                 "Install Flameshot manually:\n" +
                 "  winget install Flameshot.Flameshot\n\n" +
                 "Or see " + FlameshotAddon.DocsInstallUrl,
@@ -444,10 +444,10 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        StatusText.Text = "Flameshot install started in PowerShell…";
+        StatusText.Text = "Flameshot install started…";
         MessageBox.Show(
             this,
-            "A PowerShell window was opened to install Flameshot via winget " +
+            "A Command Prompt window was opened to install Flameshot via winget " +
             "(or Chocolatey if winget is not available).\n\n" +
             "When it finishes, click Refresh status here. " +
             "The Flameshot icon will appear to the right of Terminal if “Show icon on the bar” is checked.",
@@ -467,7 +467,7 @@ public partial class SettingsWindow : Window
         var confirm = MessageBox.Show(
             this,
             "Uninstall Flameshot from this PC?\n\n" +
-            "This runs winget uninstall (or Chocolatey) in PowerShell.",
+            "This runs winget uninstall (or Chocolatey) in Command Prompt.",
             "Uninstall Flameshot",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -478,7 +478,7 @@ public partial class SettingsWindow : Window
         {
             MessageBox.Show(
                 this,
-                "Could not start the uninstall PowerShell window.\n\n" +
+                "Could not start the uninstall helper.\n\n" +
                 "Uninstall manually:\n" +
                 "  winget uninstall Flameshot.Flameshot\n\n" +
                 "Or remove it from Windows Settings → Apps.",
@@ -488,10 +488,10 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        StatusText.Text = "Flameshot uninstall started in PowerShell…";
+        StatusText.Text = "Flameshot uninstall started…";
         MessageBox.Show(
             this,
-            "A PowerShell window was opened to uninstall Flameshot.\n\n" +
+            "A Command Prompt window was opened to uninstall Flameshot.\n\n" +
             "When it finishes, click Refresh status. The bar icon will hide once Flameshot is gone.",
             "Uninstall Flameshot",
             MessageBoxButton.OK,

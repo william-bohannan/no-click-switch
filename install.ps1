@@ -8,21 +8,30 @@
   %LocalAppData%\NoClickSwitch, registers auto-start on login, and launches the app.
   Also removes a previous Switched Bar install if present.
 
-.EXAMPLE
-  # One-liner from the web (recommended)
-  irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex
+.NOTES
+  Prefer install.cmd when Windows Security flags PowerShell installers:
+    curl.exe -L -o "%TEMP%\ncs-install.cmd" https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.cmd
+    "%TEMP%\ncs-install.cmd"
+
+  Or download NoClickSwitch-win-x64.zip from GitHub Releases and extract to
+  %LocalAppData%\NoClickSwitch, then run NoClickSwitch.exe and use Install.
 
 .EXAMPLE
-  # From Command Prompt
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex"
+  # Local script (safest PowerShell path — no irm|iex)
+  .\install.ps1
+
+.EXAMPLE
+  # Download script to a file, then run (avoids irm|iex heuristic)
+  Invoke-WebRequest -Uri https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 -OutFile "$env:TEMP\ncs-install.ps1"
+  powershell -NoProfile -File "$env:TEMP\ncs-install.ps1"
 
 .EXAMPLE
   # Install a specific release tag
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1))) -Version v1.0.0
+  .\install.ps1 -Version v1.1.4
 
 .EXAMPLE
   # Install without launching
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1))) -NoStart
+  .\install.ps1 -NoStart
 #>
 param(
     [string]$Version = "latest",
@@ -156,14 +165,12 @@ Options:
         throw "NoClickSwitch.csproj not found in source archive."
     }
 
-    Write-Info "Publishing self-contained win-x64 build (this may take a minute)..."
+    Write-Info "Publishing self-contained win-x64 multi-file build (this may take a minute)..."
     & dotnet publish $csproj `
         -c Release `
         -r win-x64 `
         --self-contained true `
-        -p:PublishSingleFile=true `
-        -p:IncludeNativeLibrariesForSelfExtract=true `
-        -p:EnableCompressionInSingleFile=true `
+        -p:PublishSingleFile=false `
         -o $publishDir
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE."

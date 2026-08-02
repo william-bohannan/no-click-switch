@@ -1838,8 +1838,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var remote = AppUpdateChecker.AvailableVersion ?? "latest";
         var result = MessageBox.Show(
             $"Upgrade {AppInstaller.DisplayName} to {remote}?\n\n" +
-            "This downloads the official GitHub release zip into a temp folder, " +
-            "then replaces the installed app and restarts.\n\n" +
+            "This downloads the official GitHub release zip in-app, " +
+            "then a local .cmd helper replaces files and restarts (no PowerShell).\n\n" +
             $"(Current version: {AppInstaller.VersionString})\n\n" +
             "Note: Windows SmartScreen may still warn about an unsigned app — " +
             "choose More info → Run anyway if you trust this project.",
@@ -1874,7 +1874,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 "Manual install (if needed):\n" +
                 "1) Download NoClickSwitch-win-x64.zip from GitHub Releases\n" +
                 "2) Extract over %LocalAppData%\\NoClickSwitch\n" +
-                "   or run install.ps1 from the repo README.\n\n" +
+                "   or run install.cmd from the repo (no PowerShell).\n\n" +
                 "If Windows blocked the download, check Defender protection history " +
                 "and allow No Click Switch / the zip from github.com.",
                 AppInstaller.DisplayName,

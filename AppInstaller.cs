@@ -102,12 +102,14 @@ internal static class AppInstaller
             File.Copy(file, dest, overwrite: true);
         }
 
-        // Also copy any subordinate folders commonly needed (none for this app today).
+        // Multi-file self-contained layouts may include runtimes/ and other subfolders.
+        // Skip Update/ (staging) and Addons/ (local helpers) if present next to a dev build.
         foreach (var dir in Directory.GetDirectories(sourceDir))
         {
             var name = Path.GetFileName(dir);
-            if (name is "runtimes" or "ref")
-                CopyDirectory(dir, Path.Combine(InstallDirectory, name));
+            if (name is "Update" or "Addons")
+                continue;
+            CopyDirectory(dir, Path.Combine(InstallDirectory, name));
         }
 
         if (!File.Exists(InstalledExePath))

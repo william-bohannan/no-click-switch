@@ -330,92 +330,115 @@ internal static class FlameshotAddon
     }
 
     /// <summary>
-    /// Install Flameshot with winget (PowerShell), similar in spirit to the NCS install script.
-    /// Returns false if the process could not start.
+    /// Install Flameshot via winget (or Chocolatey) using a local <c>.cmd</c> — no PowerShell.
+    /// Returns false if the helper could not start.
     /// </summary>
     public static bool StartInstallWithWinget()
     {
-        var script = new StringBuilder();
-        script.AppendLine("$ErrorActionPreference = 'Stop'");
-        script.AppendLine("Write-Host ''");
-        script.AppendLine("Write-Host '=> Installing Flameshot (screenshot tool)' -ForegroundColor Cyan");
-        script.AppendLine("Write-Host ''");
-        script.AppendLine("if (Get-Command winget -ErrorAction SilentlyContinue) {");
-        script.AppendLine("  Write-Host '   Using winget...' -ForegroundColor DarkGray");
-        script.AppendLine($"  winget install -e --id {WingetId} --accept-package-agreements --accept-source-agreements");
-        script.AppendLine("  if ($LASTEXITCODE -ne 0) { throw \"winget failed with exit $LASTEXITCODE\" }");
-        script.AppendLine("} elseif (Get-Command choco -ErrorAction SilentlyContinue) {");
-        script.AppendLine("  Write-Host '   winget not found; using Chocolatey...' -ForegroundColor DarkGray");
-        script.AppendLine("  choco install flameshot -y");
-        script.AppendLine("} else {");
-        script.AppendLine("  Write-Host '   winget/choco not found.' -ForegroundColor Yellow");
-        script.AppendLine($"  Start-Process '{DocsInstallUrl}'");
-        script.AppendLine("  throw 'No package manager available. Install winget or Flameshot manually.'");
-        script.AppendLine("}");
-        script.AppendLine("Write-Host ''");
-        script.AppendLine("Write-Host '   Flameshot install finished.' -ForegroundColor Green");
-        script.AppendLine("Write-Host '   You can close this window.' -ForegroundColor DarkGray");
-        script.AppendLine("Write-Host ''");
-        script.AppendLine("Read-Host 'Press Enter to close'");
-        return StartPowerShell(script.ToString());
+        var bat = new StringBuilder();
+        bat.AppendLine("@echo off");
+        bat.AppendLine("setlocal EnableExtensions");
+        bat.AppendLine("title No Click Switch - install Flameshot");
+        bat.AppendLine("echo.");
+        bat.AppendLine("echo   Installing Flameshot (screenshot tool)");
+        bat.AppendLine("echo.");
+        bat.AppendLine("where winget >NUL 2>&1");
+        bat.AppendLine("if %ERRORLEVEL%==0 (");
+        bat.AppendLine("  echo   Using winget...");
+        bat.AppendLine($"  winget install -e --id {WingetId} --accept-package-agreements --accept-source-agreements");
+        bat.AppendLine("  if errorlevel 1 goto fail");
+        bat.AppendLine("  goto ok");
+        bat.AppendLine(")");
+        bat.AppendLine("where choco >NUL 2>&1");
+        bat.AppendLine("if %ERRORLEVEL%==0 (");
+        bat.AppendLine("  echo   winget not found; using Chocolatey...");
+        bat.AppendLine("  choco install flameshot -y");
+        bat.AppendLine("  if errorlevel 1 goto fail");
+        bat.AppendLine("  goto ok");
+        bat.AppendLine(")");
+        bat.AppendLine("echo   winget/choco not found. Opening install docs...");
+        bat.AppendLine($"start \"\" \"{DocsInstallUrl}\"");
+        bat.AppendLine("echo   Install winget or Flameshot manually, then close this window.");
+        bat.AppendLine("pause");
+        bat.AppendLine("exit /b 1");
+        bat.AppendLine(":fail");
+        bat.AppendLine("echo   Install failed.");
+        bat.AppendLine("pause");
+        bat.AppendLine("exit /b 1");
+        bat.AppendLine(":ok");
+        bat.AppendLine("echo.");
+        bat.AppendLine("echo   Flameshot install finished. You can close this window.");
+        bat.AppendLine("pause");
+        bat.AppendLine("exit /b 0");
+        return StartLocalCmd("Flameshot-Install.cmd", bat.ToString());
     }
 
     /// <summary>
-    /// Uninstall Flameshot via winget (or Chocolatey). Returns false if PowerShell could not start.
+    /// Uninstall Flameshot via winget (or Chocolatey) using a local <c>.cmd</c> — no PowerShell.
     /// </summary>
     public static bool StartUninstallWithWinget()
     {
-        var script = new StringBuilder();
-        script.AppendLine("$ErrorActionPreference = 'Stop'");
-        script.AppendLine("Write-Host ''");
-        script.AppendLine("Write-Host '=> Uninstalling Flameshot' -ForegroundColor Cyan");
-        script.AppendLine("Write-Host ''");
-        script.AppendLine("if (Get-Command winget -ErrorAction SilentlyContinue) {");
-        script.AppendLine("  Write-Host '   Using winget...' -ForegroundColor DarkGray");
-        script.AppendLine($"  winget uninstall -e --id {WingetId} --accept-source-agreements");
-        script.AppendLine("  if ($LASTEXITCODE -ne 0) {");
-        script.AppendLine("    Write-Host '   winget id uninstall failed; trying by name...' -ForegroundColor DarkGray");
-        script.AppendLine("    winget uninstall --name Flameshot --accept-source-agreements");
-        script.AppendLine("    if ($LASTEXITCODE -ne 0) { throw \"winget uninstall failed with exit $LASTEXITCODE\" }");
-        script.AppendLine("  }");
-        script.AppendLine("} elseif (Get-Command choco -ErrorAction SilentlyContinue) {");
-        script.AppendLine("  Write-Host '   winget not found; using Chocolatey...' -ForegroundColor DarkGray");
-        script.AppendLine("  choco uninstall flameshot -y");
-        script.AppendLine("} else {");
-        script.AppendLine("  Write-Host '   winget/choco not found.' -ForegroundColor Yellow");
-        script.AppendLine("  Write-Host '   Remove Flameshot from Settings → Apps, or run:' -ForegroundColor DarkGray");
-        script.AppendLine("  Write-Host '     winget uninstall Flameshot.Flameshot' -ForegroundColor DarkGray");
-        script.AppendLine("  throw 'No package manager available for uninstall.'");
-        script.AppendLine("}");
-        script.AppendLine("Write-Host ''");
-        script.AppendLine("Write-Host '   Flameshot uninstall finished.' -ForegroundColor Green");
-        script.AppendLine("Write-Host '   You can close this window.' -ForegroundColor DarkGray");
-        script.AppendLine("Write-Host ''");
-        script.AppendLine("Read-Host 'Press Enter to close'");
-        return StartPowerShell(script.ToString());
+        var bat = new StringBuilder();
+        bat.AppendLine("@echo off");
+        bat.AppendLine("setlocal EnableExtensions");
+        bat.AppendLine("title No Click Switch - uninstall Flameshot");
+        bat.AppendLine("echo.");
+        bat.AppendLine("echo   Uninstalling Flameshot");
+        bat.AppendLine("echo.");
+        bat.AppendLine("where winget >NUL 2>&1");
+        bat.AppendLine("if %ERRORLEVEL%==0 (");
+        bat.AppendLine("  echo   Using winget...");
+        bat.AppendLine($"  winget uninstall -e --id {WingetId} --accept-source-agreements");
+        bat.AppendLine("  if errorlevel 1 (");
+        bat.AppendLine("    echo   Retrying by name...");
+        bat.AppendLine("    winget uninstall --name Flameshot --accept-source-agreements");
+        bat.AppendLine("    if errorlevel 1 goto fail");
+        bat.AppendLine("  )");
+        bat.AppendLine("  goto ok");
+        bat.AppendLine(")");
+        bat.AppendLine("where choco >NUL 2>&1");
+        bat.AppendLine("if %ERRORLEVEL%==0 (");
+        bat.AppendLine("  echo   winget not found; using Chocolatey...");
+        bat.AppendLine("  choco uninstall flameshot -y");
+        bat.AppendLine("  if errorlevel 1 goto fail");
+        bat.AppendLine("  goto ok");
+        bat.AppendLine(")");
+        bat.AppendLine("echo   winget/choco not found.");
+        bat.AppendLine("echo   Remove Flameshot from Settings - Apps, or run:");
+        bat.AppendLine($"echo     winget uninstall {WingetId}");
+        bat.AppendLine("pause");
+        bat.AppendLine("exit /b 1");
+        bat.AppendLine(":fail");
+        bat.AppendLine("echo   Uninstall failed.");
+        bat.AppendLine("pause");
+        bat.AppendLine("exit /b 1");
+        bat.AppendLine(":ok");
+        bat.AppendLine("echo.");
+        bat.AppendLine("echo   Flameshot uninstall finished. You can close this window.");
+        bat.AppendLine("pause");
+        bat.AppendLine("exit /b 0");
+        return StartLocalCmd("Flameshot-Uninstall.cmd", bat.ToString());
     }
 
-    private static bool StartPowerShell(string script)
+    private static bool StartLocalCmd(string fileName, string content)
     {
         try
         {
-            // Write a local .ps1 and run with -File (not -EncodedCommand).
-            // Encoded commands are a common malware signal for Windows Defender.
+            // Local .cmd only — no PowerShell / EncodedCommand (common Defender signals).
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 AppInstaller.AppName,
                 "Addons");
             Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "Flameshot-Setup.ps1");
+            var path = Path.Combine(dir, fileName);
             var header =
-                "# No Click Switch — Flameshot addon helper\n" +
-                "# Local script written by NoClickSwitch. Not downloaded from the internet.\n\n";
-            File.WriteAllText(path, header + script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+                "@rem No Click Switch — Flameshot addon helper\r\n" +
+                "@rem Local script written by NoClickSwitch. Not downloaded from the internet.\r\n";
+            File.WriteAllText(path, header + content, Encoding.ASCII);
 
             Process.Start(new ProcessStartInfo
             {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{path}\"",
+                FileName = path,
                 UseShellExecute = true,
                 WindowStyle = ProcessWindowStyle.Normal,
             });

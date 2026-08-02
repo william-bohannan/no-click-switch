@@ -11,7 +11,7 @@ namespace NoClickSwitch;
 
 /// <summary>
 /// Checks GitHub Releases for a newer version and applies updates without
-/// remote script execution (avoids Defender flagging <c>irm | iex</c>).
+/// PowerShell or remote script execution (reduces Defender / ClickFix heuristics).
 /// </summary>
 internal static class AppUpdateChecker
 {
@@ -191,8 +191,8 @@ internal static class AppUpdateChecker
     }
 
     /// <summary>
-    /// Download the GitHub release zip in-process, then run a local PowerShell <c>-File</c>
-    /// helper (not remote, not encoded) to copy files after this process exits.
+    /// Download the GitHub release zip in-process (HttpClient), then run a local
+    /// <c>.cmd</c> helper (no PowerShell) to copy files after this process exits.
     /// </summary>
     public static async Task StartUpgradeAsync(IProgress<string>? progress = null, CancellationToken ct = default)
     {
@@ -221,7 +221,7 @@ internal static class AppUpdateChecker
 
         var zipPath = Path.Combine(tempRoot, "NoClickSwitch-win-x64.zip");
         var extractDir = Path.Combine(tempRoot, "extract");
-        var applyPs1 = Path.Combine(tempRoot, "Apply-NoClickSwitchUpdate.ps1");
+        var applyCmd = Path.Combine(tempRoot, "Apply-NoClickSwitchUpdate.cmd");
 
         progress?.Report($"Downloading {tag ?? "latest"} from GitHub…");
         using (var dl = CreateClient(TimeSpan.FromMinutes(15)))
@@ -255,58 +255,58 @@ internal static class AppUpdateChecker
 
         progress?.Report("Starting local update helper…");
 
-        // Clear, readable local script — no encoding, no network, product-branded.
-        var ps = new StringBuilder();
-        ps.AppendLine("#Requires -Version 5.1");
-        ps.AppendLine("#");
-        ps.AppendLine("# No Click Switch (NCS) — local update helper");
-        ps.AppendLine("# Written by NoClickSwitch.exe during Upgrade.");
-        ps.AppendLine("# This script does NOT download anything. It only copies files");
-        ps.AppendLine("# already fetched from https://github.com/william-bohannan/no-click-switch");
-        ps.AppendLine("#");
-        ps.AppendLine($"$ErrorActionPreference = 'Stop'");
-        ps.AppendLine($"$PidToWait = {pid}");
-        ps.AppendLine($"$Source = '{EscapePs(sourceDir)}'");
-        ps.AppendLine($"$Dest = '{EscapePs(installDir)}'");
-        ps.AppendLine($"$Exe = '{EscapePs(installedExe)}'");
-        ps.AppendLine("");
-        ps.AppendLine("Write-Host ''");
-        ps.AppendLine("Write-Host '  No Click Switch — applying update' -ForegroundColor Cyan");
-        ps.AppendLine("Write-Host '  https://github.com/william-bohannan/no-click-switch' -ForegroundColor DarkGray");
-        ps.AppendLine("Write-Host ''");
-        ps.AppendLine("Write-Host '  Waiting for the old process to exit...' -ForegroundColor DarkGray");
-        ps.AppendLine("try { Wait-Process -Id $PidToWait -Timeout 60 -ErrorAction SilentlyContinue } catch { }");
-        ps.AppendLine("Start-Sleep -Seconds 1");
-        ps.AppendLine("");
-        ps.AppendLine("Write-Host \"  Installing to $Dest\" -ForegroundColor DarkGray");
-        ps.AppendLine("New-Item -ItemType Directory -Force -Path $Dest | Out-Null");
-        ps.AppendLine("Copy-Item -Path (Join-Path $Source '*') -Destination $Dest -Recurse -Force");
-        ps.AppendLine("");
-        ps.AppendLine("if (-not (Test-Path -LiteralPath $Exe)) {");
-        ps.AppendLine("  Write-Host '  Update failed: executable missing after copy.' -ForegroundColor Red");
-        ps.AppendLine("  Read-Host 'Press Enter to close'");
-        ps.AppendLine("  exit 1");
-        ps.AppendLine("}");
-        ps.AppendLine("");
-        ps.AppendLine("# Auto-start on login (current user only)");
-        ps.AppendLine("$runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'");
-        ps.AppendLine("New-Item -Path $runKey -Force | Out-Null");
-        ps.AppendLine("Set-ItemProperty -Path $runKey -Name 'NoClickSwitch' -Value ('\"' + $Exe + '\"')");
-        ps.AppendLine("");
-        ps.AppendLine("Write-Host '  Starting No Click Switch...' -ForegroundColor Green");
-        ps.AppendLine("Start-Process -FilePath $Exe");
-        ps.AppendLine("Write-Host '  Update complete.' -ForegroundColor Green");
-        ps.AppendLine("Start-Sleep -Seconds 2");
+        // Local batch only — no PowerShell, no network, no encoded commands.
+        // Paths are written as SET "VAR=value" (quoted) so spaces are safe.
+        var cmd = new StringBuilder();
+        cmd.AppendLine("@echo off");
+        cmd.AppendLine("setlocal EnableExtensions");
+        cmd.AppendLine("title No Click Switch - applying update");
+        cmd.AppendLine("echo.");
+        cmd.AppendLine("echo   No Click Switch - applying update");
+        cmd.AppendLine("echo   https://github.com/william-bohannan/no-click-switch");
+        cmd.AppendLine("echo.");
+        cmd.AppendLine($"set \"PID_WAIT={pid}\"");
+        cmd.AppendLine($"set \"SOURCE={SanitizeCmdPath(sourceDir)}\"");
+        cmd.AppendLine($"set \"DEST={SanitizeCmdPath(installDir)}\"");
+        cmd.AppendLine($"set \"EXE={SanitizeCmdPath(installedExe)}\"");
+        cmd.AppendLine("echo   Waiting for the old process to exit...");
+        cmd.AppendLine("set /a _tries=0");
+        cmd.AppendLine(":wait_loop");
+        cmd.AppendLine("set /a _tries+=1");
+        cmd.AppendLine("if %_tries% GTR 90 goto wait_done");
+        cmd.AppendLine("tasklist /FI \"PID eq %PID_WAIT%\" 2>NUL | findstr /I /C:\"%PID_WAIT%\" >NUL");
+        cmd.AppendLine("if errorlevel 1 goto wait_done");
+        cmd.AppendLine("timeout /t 1 /nobreak >NUL");
+        cmd.AppendLine("goto wait_loop");
+        cmd.AppendLine(":wait_done");
+        cmd.AppendLine("timeout /t 1 /nobreak >NUL");
+        cmd.AppendLine("echo   Installing to %DEST%");
+        cmd.AppendLine("if not exist \"%DEST%\" mkdir \"%DEST%\"");
+        // robocopy: exit codes 0-7 mean success (files copied / extra files / etc.)
+        cmd.AppendLine("robocopy \"%SOURCE%\" \"%DEST%\" /E /IS /IT /R:3 /W:1 /NFL /NDL /NJH /NJS /XD Update");
+        cmd.AppendLine("if errorlevel 8 (");
+        cmd.AppendLine("  echo   Update failed: robocopy error %ERRORLEVEL%");
+        cmd.AppendLine("  pause");
+        cmd.AppendLine("  exit /b 1");
+        cmd.AppendLine(")");
+        cmd.AppendLine("if not exist \"%EXE%\" (");
+        cmd.AppendLine("  echo   Update failed: executable missing after copy.");
+        cmd.AppendLine("  pause");
+        cmd.AppendLine("  exit /b 1");
+        cmd.AppendLine(")");
+        cmd.AppendLine("rem Auto-start on login (current user only)");
+        cmd.AppendLine("reg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v NoClickSwitch /t REG_SZ /d \"\\\"%EXE%\\\"\" /f >NUL");
+        cmd.AppendLine("echo   Starting No Click Switch...");
+        cmd.AppendLine("start \"\" \"%EXE%\"");
+        cmd.AppendLine("echo   Update complete.");
+        cmd.AppendLine("timeout /t 2 /nobreak >NUL");
+        cmd.AppendLine("endlocal");
 
-        await File.WriteAllTextAsync(applyPs1, ps.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct)
-            .ConfigureAwait(false);
+        await File.WriteAllTextAsync(applyCmd, cmd.ToString(), Encoding.ASCII, ct).ConfigureAwait(false);
 
-        // -File (not -EncodedCommand): clearer to the user and less "script malware"-like.
         Process.Start(new ProcessStartInfo
         {
-            FileName = "powershell.exe",
-            Arguments =
-                $"-NoProfile -ExecutionPolicy Bypass -File \"{applyPs1}\"",
+            FileName = applyCmd,
             WorkingDirectory = tempRoot,
             UseShellExecute = true,
             WindowStyle = ProcessWindowStyle.Normal,
@@ -327,6 +327,13 @@ internal static class AppUpdateChecker
         });
     }
 
-    private static string EscapePs(string path)
-        => path.Replace("'", "''");
+    /// <summary>Strip characters that break <c>set "VAR=…"</c> batch lines.</summary>
+    private static string SanitizeCmdPath(string path)
+    {
+        // Paths from LocalAppData / our staging dirs should never contain these;
+        // reject rather than write a broken or injectable batch line.
+        if (path.IndexOfAny(['"', '\r', '\n', '&', '|', '>', '<']) >= 0)
+            throw new InvalidOperationException("Install path contains characters unsafe for the update helper.");
+        return path;
+    }
 }

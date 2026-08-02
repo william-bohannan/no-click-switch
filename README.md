@@ -13,27 +13,34 @@ A minimal always-on-top Windows top bar that shows **one tab per open window**.
 
 No admin rights. Installs to `%LocalAppData%\NoClickSwitch`, starts with Windows (current user), and launches the app.
 
-**PowerShell** (recommended):
+### Recommended: `install.cmd` (no PowerShell)
 
-```powershell
-irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex
-```
-
-**Command Prompt:**
+Avoids `irm | iex`, which Windows Defender often treats like malware:
 
 ```cmd
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex"
+curl.exe -L -o "%TEMP%\ncs-install.cmd" https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.cmd && "%TEMP%\ncs-install.cmd"
 ```
 
-The script downloads the latest **self-contained** release (no .NET install required). If no release is available, it falls back to building from source when the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) is present.
+Or download **NoClickSwitch-win-x64.zip** from [Releases](https://github.com/william-bohannan/no-click-switch/releases/latest), extract to `%LocalAppData%\NoClickSwitch`, run `NoClickSwitch.exe`, then **Install** from the ☰ menu.
+
+### PowerShell (advanced / build-from-source)
+
+Prefer saving the script to a file (not piping into `iex`):
+
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 -OutFile "$env:TEMP\ncs-install.ps1"
+powershell -NoProfile -File "$env:TEMP\ncs-install.ps1"
+```
+
+The script downloads the latest **self-contained multi-file** release (no .NET install required). If no release is available, it falls back to building from source when the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) is present.
 
 ### Uninstall
 
-```powershell
-irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/uninstall.ps1 | iex
+```cmd
+curl.exe -L -o "%TEMP%\ncs-uninstall.cmd" https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/uninstall.cmd && "%TEMP%\ncs-uninstall.cmd"
 ```
 
-You can also use **Uninstall** from the app’s ☰ menu.
+Or **Uninstall** from the app’s ☰ menu.
 
 ## Behaviour
 
@@ -53,12 +60,12 @@ You can also use **Uninstall** from the app’s ☰ menu.
 - Temps via LibreHardwareMonitor (GPU row only if a sensor is found)
 - **Menu (☰)** (hover to open):
   - **Settings** → customization (left nav + right form)
-  - **Upgrade to x.y.z** (only when a newer GitHub release exists) — downloads the GitHub release zip in-app and restarts (no remote PowerShell). Unsigned builds may still trigger SmartScreen; use **More info → Run anyway** if you trust the project.
+  - **Upgrade to x.y.z** (only when a newer GitHub release exists) — downloads the GitHub zip in-app; a local `.cmd` + `robocopy` applies files (no PowerShell). Unsigned builds may still trigger SmartScreen; use **More info → Run anyway** if you trust the project.
   - **Install** / **Uninstall**
   - App name, version, **GitHub**, **Website**
   - **Close**
 - **Settings** (Customization): mode, theme, opacity/blur (Mica/Acrylic), hover delay, stats, tab width, bar auto-hide, exclude list, **keyboard**, **monitors / tray**, **addons**. Stored in `%LocalAppData%\NoClickSwitch\settings.json`
-- **Addons**: optional tools on the bar. **Flameshot** — icon right of Terminal when installed; **Install** / **Uninstall** via Settings (PowerShell + winget)
+- **Addons**: optional tools on the bar. **Flameshot** — icon right of Terminal when installed; **Install** / **Uninstall** via Settings (local `.cmd` + winget)
 - **Tab context menu**: Pin / Unpin, Minimize, Close
 - **Pinned** processes stay at the front of the strip (pin from the tab menu)
 - **Hotkeys**: Ctrl+Alt+1…9 and Ctrl+Alt+0 jump to tabs 1–10 (optional Win+1…0; shell may override)
@@ -77,7 +84,7 @@ You can also use **Uninstall** from the app’s ☰ menu.
 
 ## Windows Security / SmartScreen
 
-No Click Switch is a small **unsigned** open-source utility. It controls windows (bring-to-front, hotkeys) and can download updates from **GitHub Releases**. Microsoft Defender’s machine-learning models sometimes flag that combination as a threat (names vary — e.g. “behavior”, “command line”, “Wacatac”, etc.). That is a **false positive**, not a real trojan.
+No Click Switch is a small **unsigned** open-source utility. It controls windows (bring-to-front, hotkeys) and can download updates from **GitHub Releases**. Microsoft Defender’s machine-learning models sometimes flag that combination as a threat (names vary — e.g. “behavior”, “ClickFix”, “Commando”, “Wacatac”). That is a **false positive**, not a real trojan.
 
 ### Allow the app (recommended)
 
@@ -98,13 +105,14 @@ No Click Switch is a small **unsigned** open-source utility. It controls windows
 - [Microsoft Security Intelligence — submit a file](https://www.microsoft.com/en-us/wdsi/filesubmission)  
   Submit `NoClickSwitch.exe` or the release zip as a **software developer** false positive.
 
-### What we do to reduce flags
+### What we do to reduce flags (no cert required)
 
-- Upgrades download the **official GitHub zip in-app** (no `irm | iex` remote PowerShell)
-- Helper scripts are written **locally** and run with `powershell -File` (not `-EncodedCommand`)
-- Release packages are **multi-file** self-contained builds (not a single packed exe)
+- **No PowerShell for upgrades or Flameshot helpers** — local `.cmd` + `robocopy` / `winget` only
+- **No `irm | iex` in the recommended install path** — use `install.cmd` (curl + tar) or a manual zip extract
+- **Multi-file** self-contained releases (not a single packed self-extracting exe)
+- Upgrades download the **official GitHub zip in-process** via HttpClient (no remote script)
 
-Long-term fix is a paid **code-signing certificate** (Authenticode), which we may add later.
+Long-term reputation fix is a paid **code-signing certificate** (Authenticode), which we may add later.
 
 ## Requirements
 

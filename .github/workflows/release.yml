@@ -41,23 +41,25 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "tag=$tag version=$version"
 
-      - name: Publish win-x64 (self-contained)
+      - name: Publish win-x64 (self-contained, multi-file)
         shell: pwsh
         run: |
+          # Multi-file layout (not PublishSingleFile) reduces Defender ML false positives
+          # on packed single-exe stubs that self-extract at runtime.
           $out = Join-Path $env:GITHUB_WORKSPACE "publish"
           dotnet publish NoClickSwitch.csproj `
             -c Release `
             -r win-x64 `
             --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:EnableCompressionInSingleFile=true `
+            -p:PublishSingleFile=false `
             -p:Version=${{ steps.meta.outputs.version }} `
             -p:AssemblyVersion=${{ steps.meta.outputs.version }}.0 `
             -p:FileVersion=${{ steps.meta.outputs.version }}.0 `
             -p:InformationalVersion=${{ steps.meta.outputs.version }} `
             -o $out
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path (Join-Path $out "NoClickSwitch.exe"))) { throw "publish missing NoClickSwitch.exe" }
+          Get-ChildItem $out | Measure-Object | ForEach-Object { Write-Host "publish files: $($_.Count)" }
 
       - name: Zip package
         shell: pwsh
