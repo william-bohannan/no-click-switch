@@ -15,6 +15,28 @@ internal static class StartMenuLauncher
     private const ushort VkLwin = 0x5B;
     private const ushort VkEscape = 0x1B;
     private const uint KeyeventfKeyup = 0x0002;
+    private const uint KeyeventfExtendedKey = 0x0001;
+
+    private const uint WmSyscommand = 0x0112;
+    // Classic shell: open/toggle Start (works when SendInput is blocked).
+    private static readonly IntPtr ScTasklist = new(0xF130);
+
+    /// <summary>
+    /// After we intentionally open Start, suppress bar foreground-stealing briefly
+    /// so hover/mousemove on the bar does not immediately dismiss it.
+    /// </summary>
+    private static long _suppressForegroundStealUntilTick;
+
+    /// <summary>True while the bar should leave the Start menu alone.</summary>
+    public static bool ShouldSuppressForegroundSteal
+    {
+        get
+        {
+            if (Environment.TickCount64 < _suppressForegroundStealUntilTick)
+                return true;
+            return IsOpen();
+        }
+    }
 
     /// <summary>True if the Start launcher is currently visible.</summary>
     public static bool IsOpen()
@@ -34,7 +56,7 @@ internal static class StartMenuLauncher
         if (wasOpenBeforeClick)
         {
             // Click may already have dismissed Start; Esc is a safe no-op if closed.
-            // Do NOT send Win here — that would reopen it.
+            // Do NOT send Win / SC_TASKLIST here — that would reopen it.
             Close();
         }
         else
@@ -43,34 +65,60 @@ internal static class StartMenuLauncher
         }
     }
 
-    public static void Open() => SendKey(VkLwin);
+    public static void Open()
+    {
+        // Give Start time to appear and receive focus before the bar reclaims FG.
+        _suppressForegroundStealUntilTick = Environment.TickCount64 + 1500;
+
+        // Prefer shell task list command (does not depend on synthetic keyboard input).
+        if (TryOpenViaTaskbar())
+            return;
+
+        // Fallback: extended Left-Win key via SendInput.
+        SendKey(VkLwin, extended: true);
+    }
 
     public static void Close()
     {
+        _suppressForegroundStealUntilTick = 0;
+
         // Prefer Esc (closes Start/Search without reopening).
-        SendKey(VkEscape);
+        SendKey(VkEscape, extended: false);
 
         // If still open (rare), Win toggles it shut.
         if (IsOpen())
-            SendKey(VkLwin);
+            SendKey(VkLwin, extended: true);
     }
 
-    private static void SendKey(ushort vk)
+    private static bool TryOpenViaTaskbar()
     {
+        var tray = FindWindow("Shell_TrayWnd", null);
+        if (tray == IntPtr.Zero)
+            return false;
+
+        // Post so we don't block; shell opens Start asynchronously.
+        return PostMessage(tray, WmSyscommand, ScTasklist, IntPtr.Zero);
+    }
+
+    private static void SendKey(ushort vk, bool extended)
+    {
+        var downFlags = extended ? KeyeventfExtendedKey : 0u;
+        var upFlags = (extended ? KeyeventfExtendedKey : 0u) | KeyeventfKeyup;
+
         var inputs = new Input[2];
 
         inputs[0].type = InputKeyboard;
         inputs[0].U.ki = new KeybdInput
         {
             wVk = vk,
-            dwFlags = 0,
+            dwFlags = downFlags,
         };
 
         inputs[1].type = InputKeyboard;
         inputs[1].U.ki = new KeybdInput
         {
             wVk = vk,
-            dwFlags = KeyeventfKeyup,
+            dwFlags = upFlags,
         };
 
         _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>());
@@ -82,13 +130,14 @@ internal static class StartMenuLauncher
     private static bool TryIsLauncherVisibleViaCom(out bool visible)
     {
         visible = false;
+        object? obj = null;
         try
         {
             var type = Type.GetTypeFromCLSID(new Guid("7E5FE3D9-985F-4908-91F9-EE19F9FD1514"));
             if (type is null)
                 return false;
 
-            var obj = Activator.CreateInstance(type);
+            obj = Activator.CreateInstance(type);
             if (obj is null)
                 return false;
 
@@ -105,10 +154,16 @@ internal static class StartMenuLauncher
         {
             return false;
         }
+        finally
+        {
+            if (obj is not null && Marshal.IsComObject(obj))
+                Marshal.ReleaseComObject(obj);
+        }
     }
 
     /// <summary>
     /// Fallback: look for known Start / launcher host windows.
+    /// Keep this strict — false positives make Toggle always "close" and Start appears dead.
     /// </summary>
     private static bool IsStartWindowVisibleFallback()
     {
@@ -126,30 +181,27 @@ internal static class StartMenuLauncher
             if (className is "Windows.UI.Core.CoreWindow"
                 && title is "Start" or "Search" or "SearchUI")
             {
+                if (GetWindowRect(hWnd, out var rc) && HasNonTrivialSize(rc))
+                {
+                    found = true;
+                    return false;
+                }
+            }
+
+            // Classic immersive launcher only (not every InputSite window).
+            if (className is "ImmersiveLauncher"
+                && GetWindowRect(hWnd, out var rc2)
+                && HasNonTrivialSize(rc2))
+            {
                 found = true;
                 return false;
             }
 
-            if (className is "ImmersiveLauncher" or "Windows.UI.Input.InputSite.WindowClass")
-            {
-                // Immersive launcher is Start when visible with a non-empty rect.
-                if (GetWindowRect(hWnd, out var rc)
-                    && rc.Right > rc.Left
-                    && rc.Bottom > rc.Top
-                    && (title is "Start" or "" or "Search"))
-                {
-                    // Many InputSite windows exist; require Start title when present.
-                    if (className == "ImmersiveLauncher" || title is "Start" or "Search")
-                    {
-                        found = true;
-                        return false;
-                    }
-                }
-            }
-
             // Win11 XAML Start host sometimes uses this class with Start-related title.
             if (className.Contains("XamlExplorerHost", StringComparison.OrdinalIgnoreCase)
-                && title.Contains("Start", StringComparison.OrdinalIgnoreCase))
+                && title.Contains("Start", StringComparison.OrdinalIgnoreCase)
+                && GetWindowRect(hWnd, out var rc3)
+                && HasNonTrivialSize(rc3))
             {
                 found = true;
                 return false;
@@ -160,6 +212,9 @@ internal static class StartMenuLauncher
 
         return found;
     }
+
+    private static bool HasNonTrivialSize(Rect rc)
+        => rc.Right - rc.Left > 50 && rc.Bottom - rc.Top > 50;
 
     private static string GetClassName(IntPtr hWnd)
     {
@@ -266,4 +321,10 @@ internal static class StartMenuLauncher
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out Rect lpRect);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 }

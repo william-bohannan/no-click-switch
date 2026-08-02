@@ -4,184 +4,214 @@
         Title="No Click Switch (NCS)"
         WindowStyle="None"
         ResizeMode="NoResize"
-        SizeToContent="Height"
+        SizeToContent="Manual"
         HorizontalAlignment="Stretch"
         ShowInTaskbar="True"
         Topmost="True"
         Background="#F2F2F2"
         AllowsTransparency="False"
         Loaded="Window_Loaded"
-        Closed="Window_Closed">
-    <DockPanel LastChildFill="True" HorizontalAlignment="Stretch">
-        <!-- Left: hamburger | Start | Explorer -->
-        <StackPanel DockPanel.Dock="Left"
+        Closed="Window_Closed"
+        MouseLeave="Window_MouseLeave"
+        MouseEnter="Window_MouseEnter">
+    <Window.Resources>
+        <SolidColorBrush x:Key="TabBgBrush" Color="#E8E8E8" />
+        <SolidColorBrush x:Key="TabBorderBrush" Color="#C8C8C8" />
+        <SolidColorBrush x:Key="TabActiveBgBrush" Color="#D4D4D4" />
+        <SolidColorBrush x:Key="TabActiveBorderBrush" Color="#8E8E8E" />
+        <SolidColorBrush x:Key="TabHoverBgBrush" Color="#D0E8FF" />
+        <SolidColorBrush x:Key="TabHoverBorderBrush" Color="#6BA3D6" />
+        <SolidColorBrush x:Key="TabTitleBrush" Color="#444444" />
+        <SolidColorBrush x:Key="TabTitleActiveBrush" Color="#222222" />
+        <SolidColorBrush x:Key="ChromeIconBrush" Color="#6B6B6B" />
+        <SolidColorBrush x:Key="StatLabelBrush" Color="#6B6B6B" />
+        <SolidColorBrush x:Key="ClockTimeBrush" Color="#1A1A1A" />
+        <SolidColorBrush x:Key="ClockDateBrush" Color="#555555" />
+
+        <!-- Win11 Segoe Fluent Icons (fallback Segoe MDL2 Assets) -->
+        <FontFamily x:Key="FluentIconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+        <Style x:Key="ChromeIconText" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource FluentIconFont}" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Foreground" Value="{DynamicResource ChromeIconBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="UseLayoutRounding" Value="True" />
+        </Style>
+
+        <Style x:Key="ChromeIconButton" TargetType="Button">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="4"
+                                Width="{TemplateBinding Width}"
+                                Height="{TemplateBinding Height}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#E0E0E0" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <DockPanel x:Name="RootPanel" LastChildFill="True" HorizontalAlignment="Stretch">
+        <!-- Left: hamburger | Start | Explorer | Terminal -->
+        <StackPanel x:Name="LeftChrome"
+                    DockPanel.Dock="Left"
                     Orientation="Horizontal"
                     VerticalAlignment="Top"
                     Height="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=TabHeight}"
                     Margin="6,6,0,0">
-            <!-- Hamburger menu: Close, About, Install/Uninstall, version -->
+            <!-- Hamburger: Settings | Install/Uninstall | app info + links | Close -->
             <Button x:Name="MenuButton"
+                    Style="{StaticResource ChromeIconButton}"
                     VerticalAlignment="Center"
                     Margin="0,0,2,0"
-                    Width="28"
-                    Height="28"
-                    Cursor="Hand"
                     Click="MenuButton_Click"
-                    ToolTip="Menu"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Padding="0">
+                    ToolTip="Menu">
                 <Button.ContextMenu>
                     <ContextMenu x:Name="AppMenu"
                                  Opened="AppMenu_Opened">
-                        <MenuItem x:Name="MenuClose"
-                                  Header="Close"
-                                  Click="MenuClose_Click" />
-                        <MenuItem x:Name="MenuAbout"
-                                  Header="About"
-                                  Click="MenuAbout_Click" />
+                        <MenuItem x:Name="MenuSettings"
+                                  Header="Settings"
+                                  Click="MenuSettings_Click">
+                            <MenuItem.Icon>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE713;" FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </MenuItem.Icon>
+                        </MenuItem>
                         <Separator />
                         <MenuItem x:Name="MenuInstall"
                                   Header="Install"
                                   Click="MenuInstall_Click"
-                                  ToolTip="Install for this user and start with Windows login" />
+                                  ToolTip="Install for this user and start with Windows login">
+                            <MenuItem.Icon>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE896;" FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem x:Name="MenuUninstall"
                                   Header="Uninstall"
                                   Click="MenuUninstall_Click"
-                                  ToolTip="Remove auto-start and installed files" />
-                        <Separator x:Name="MenuVersionSeparator" />
-                        <MenuItem x:Name="MenuVersion"
-                                  Header="1.0.0"
-                                  IsEnabled="False" />
+                                  ToolTip="Remove auto-start and installed files">
+                            <MenuItem.Icon>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE74D;" FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <Separator />
                         <MenuItem x:Name="MenuAppName"
                                   Header="No Click Switch (NCS)"
+                                  IsEnabled="False">
+                            <MenuItem.Icon>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE946;" FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="MenuVersion"
+                                  Header="1.1.0"
                                   IsEnabled="False" />
+                        <MenuItem x:Name="MenuGitHub"
+                                  Header="GitHub"
+                                  Click="MenuGitHub_Click"
+                                  ToolTip="Open the GitHub repository">
+                            <MenuItem.Icon>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE8A7;" FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="MenuWebsite"
+                                  Header="Website"
+                                  Click="MenuWebsite_Click"
+                                  ToolTip="Open noclickswitch.com">
+                            <MenuItem.Icon>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE774;" FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <Separator />
+                        <MenuItem x:Name="MenuClose"
+                                  Header="Close"
+                                  Click="MenuClose_Click">
+                            <MenuItem.Icon>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE8BB;" FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </MenuItem.Icon>
+                        </MenuItem>
                     </ContextMenu>
                 </Button.ContextMenu>
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Root"
-                                Background="Transparent"
-                                CornerRadius="4"
-                                Width="28"
-                                Height="28">
-                            <!-- Hamburger: three grey lines -->
-                            <Canvas Width="16" Height="12"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center">
-                                <Rectangle Canvas.Left="0" Canvas.Top="0"
-                                           Width="16" Height="2" RadiusX="1" RadiusY="1"
-                                           Fill="#6B6B6B" />
-                                <Rectangle Canvas.Left="0" Canvas.Top="5"
-                                           Width="16" Height="2" RadiusX="1" RadiusY="1"
-                                           Fill="#6B6B6B" />
-                                <Rectangle Canvas.Left="0" Canvas.Top="10"
-                                           Width="16" Height="2" RadiusX="1" RadiusY="1"
-                                           Fill="#6B6B6B" />
-                            </Canvas>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#E0E0E0" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Button.Template>
+                <!-- GlobalNavButton -->
+                <TextBlock Style="{StaticResource ChromeIconText}" Text="&#xE700;" />
             </Button>
 
-            <!-- Windows Start: modern 4-square logo -->
+            <!-- Start (GoToStart) -->
             <Button x:Name="StartButton"
+                    Style="{StaticResource ChromeIconButton}"
                     VerticalAlignment="Center"
                     Margin="2,0"
-                    Width="28"
-                    Height="28"
-                    Cursor="Hand"
                     PreviewMouseLeftButtonDown="StartButton_PreviewMouseLeftButtonDown"
                     Click="StartButton_Click"
-                    ToolTip="Start"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Padding="0">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Root"
-                                Background="Transparent"
-                                CornerRadius="4"
-                                Width="28"
-                                Height="28">
-                            <Canvas Width="16" Height="16"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center">
-                                <Rectangle Canvas.Left="0" Canvas.Top="0"
-                                           Width="7" Height="7" RadiusX="0.5" RadiusY="0.5"
-                                           Fill="#6B6B6B" />
-                                <Rectangle Canvas.Left="9" Canvas.Top="0"
-                                           Width="7" Height="7" RadiusX="0.5" RadiusY="0.5"
-                                           Fill="#6B6B6B" />
-                                <Rectangle Canvas.Left="0" Canvas.Top="9"
-                                           Width="7" Height="7" RadiusX="0.5" RadiusY="0.5"
-                                           Fill="#6B6B6B" />
-                                <Rectangle Canvas.Left="9" Canvas.Top="9"
-                                           Width="7" Height="7" RadiusX="0.5" RadiusY="0.5"
-                                           Fill="#6B6B6B" />
-                            </Canvas>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#E0E0E0" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Button.Template>
+                    ToolTip="Start">
+                <TextBlock Style="{StaticResource ChromeIconText}" Text="&#xE8FC;" />
             </Button>
 
-            <!-- File Explorer -->
+            <!-- File Explorer (Folder) — Ctrl+click = admin -->
             <Button x:Name="ExplorerButton"
+                    Style="{StaticResource ChromeIconButton}"
                     VerticalAlignment="Center"
                     Margin="2,0"
-                    Width="28"
-                    Height="28"
-                    Cursor="Hand"
                     Click="ExplorerButton_Click"
-                    ToolTip="File Explorer"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Padding="0">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Root"
-                                Background="Transparent"
-                                CornerRadius="4"
-                                Width="28"
-                                Height="28">
-                            <!-- Grey folder icon -->
-                            <Canvas Width="18" Height="14"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center">
-                                <!-- Tab -->
-                                <Path Data="M 0,3 L 0,1.5 Q 0,0.5 1,0.5 L 6,0.5 L 8,3 Z"
-                                      Fill="#6B6B6B" />
-                                <!-- Body -->
-                                <Path Data="M 0,3 L 18,3 L 18,13 Q 18,14 17,14 L 1,14 Q 0,14 0,13 Z"
-                                      Fill="#6B6B6B" />
-                            </Canvas>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#E0E0E0" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Button.Template>
+                    ToolTip="File Explorer (Ctrl+click = admin)">
+                <TextBlock Style="{StaticResource ChromeIconText}" Text="&#xE8B7;" />
+            </Button>
+
+            <!-- Windows Terminal (CommandPrompt) — Ctrl+click = admin -->
+            <Button x:Name="TerminalButton"
+                    Style="{StaticResource ChromeIconButton}"
+                    VerticalAlignment="Center"
+                    Margin="2,0"
+                    Click="TerminalButton_Click"
+                    ToolTip="Windows Terminal (Ctrl+click = admin)">
+                <TextBlock Style="{StaticResource ChromeIconText}" Text="&#xE756;" />
+            </Button>
+
+            <!-- Flameshot addon (Crop) — only visible when installed + enabled in Settings → Addons -->
+            <Button x:Name="FlameshotButton"
+                    Style="{StaticResource ChromeIconButton}"
+                    VerticalAlignment="Center"
+                    Margin="2,0"
+                    Visibility="Collapsed"
+                    Click="FlameshotButton_Click"
+                    ToolTip="Flameshot (screenshot)">
+                <TextBlock Style="{StaticResource ChromeIconText}" Text="&#xE7A8;" />
             </Button>
         </StackPanel>
 
@@ -190,7 +220,8 @@
           (Top + same vertical inset as TabsList/tab margins). Icons centered in that row.
         -->
         <!-- Right: CPU | MEM | HDD | auto-hide | clock -->
-        <StackPanel DockPanel.Dock="Right"
+        <StackPanel x:Name="RightChrome"
+                    DockPanel.Dock="Right"
                     Orientation="Horizontal"
                     VerticalAlignment="Top"
                     Height="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=TabHeight}"
@@ -201,7 +232,8 @@
               2) HDD0% / HDD1% (2nd only if present)
               3) CPU°C / GPU°C (GPU only if present)
             -->
-            <StackPanel Orientation="Horizontal"
+            <StackPanel x:Name="StatsHost"
+                        Orientation="Horizontal"
                         VerticalAlignment="Center"
                         Margin="0,0,6,0">
                 <!-- Stack 1: CPU + MEM -->
@@ -277,9 +309,9 @@
             </StackPanel>
 
             <!--
-              Taskbar auto-hide:
-              OFF (visible)  → bottom line + down arrow (will hide)
-              ON  (hidden)   → bottom line + up arrow rising from the line
+              Taskbar auto-hide (Fluent):
+              OFF → ChevronDown (taskbar will hide)
+              ON  → ChevronUp (taskbar rises on hover)
             -->
             <ToggleButton x:Name="TaskbarAutoHideToggle"
                           VerticalAlignment="Center"
@@ -298,49 +330,15 @@
                                 Background="Transparent"
                                 CornerRadius="4"
                                 Width="28"
-                                Height="28"
-                                BorderBrush="Transparent"
-                                BorderThickness="1">
-                            <Grid Width="28" Height="28">
-                                <!-- Bottom taskbar line (centered; arrow sits on its midpoint) -->
-                                <Border x:Name="BarStrip"
-                                        Width="16"
-                                        Height="2.5"
-                                        CornerRadius="1"
-                                        Background="#6B6B6B"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Bottom"
-                                        Margin="0,0,0,5" />
-                                <!--
-                                  Down: vertical stem into chevron, centered on the bar (x=14).
-                                  Up: same, inverted — stem rises from the line.
-                                  Canvas is 28×28 so path coords match the control.
-                                -->
-                                <Path x:Name="ArrowDown"
-                                      Data="M 14,7 L 14,14 M 10,11 L 14,16 L 18,11"
-                                      Stroke="#6B6B6B"
-                                      StrokeThickness="1.75"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round"
-                                      Stretch="None"
-                                      HorizontalAlignment="Left"
-                                      VerticalAlignment="Top"
-                                      Width="28"
-                                      Height="28" />
-                                <Path x:Name="ArrowUp"
-                                      Data="M 14,16 L 14,9 M 10,12 L 14,7 L 18,12"
-                                      Stroke="#6B6B6B"
-                                      StrokeThickness="1.75"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round"
-                                      Stretch="None"
-                                      Visibility="Collapsed"
-                                      HorizontalAlignment="Left"
-                                      VerticalAlignment="Top"
-                                      Width="28"
-                                      Height="28" />
+                                Height="28">
+                            <Grid>
+                                <TextBlock x:Name="IconDown"
+                                           Style="{StaticResource ChromeIconText}"
+                                           Text="&#xE70D;" />
+                                <TextBlock x:Name="IconUp"
+                                           Style="{StaticResource ChromeIconText}"
+                                           Text="&#xE70E;"
+                                           Visibility="Collapsed" />
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -351,8 +349,8 @@
                                 <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="ArrowDown" Property="Visibility" Value="Collapsed" />
-                                <Setter TargetName="ArrowUp" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="IconDown" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="IconUp" Property="Visibility" Value="Visible" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -391,31 +389,47 @@
             </Border>
         </StackPanel>
 
-        <!-- Tabs: drag to reorder; order is kept across refresh. Click opens window. -->
+        <!-- Tabs: drag to reorder; wrap with even row gap. Click opens window. -->
         <ItemsControl x:Name="TabsList"
-                      Margin="4,4,0,4"
+                      Margin="6,6,2,2"
                       AllowDrop="True"
                       DragOver="TabsList_DragOver"
                       Drop="TabsList_Drop"
-                      GiveFeedback="TabsList_GiveFeedback">
+                      GiveFeedback="TabsList_GiveFeedback"
+                      SnapsToDevicePixels="True"
+                      UseLayoutRounding="True"
+                      TextOptions.TextFormattingMode="Display"
+                      TextOptions.TextRenderingMode="ClearType">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
+                    <!-- Horizontal wrap; equal gaps via right+bottom item margins only -->
                     <WrapPanel Orientation="Horizontal" />
                 </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemContainerStyle>
+                <Style TargetType="ContentPresenter">
+                    <!-- Margin = (0,0,gap,gap): one full gap between neighbors, never half+half -->
+                    <Setter Property="Margin" Value="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=TabItemMargin}" />
+                    <Setter Property="VerticalAlignment" Value="Top" />
+                    <Setter Property="SnapsToDevicePixels" Value="True" />
+                </Style>
+            </ItemsControl.ItemContainerStyle>
             <ItemsControl.ItemTemplate>
                 <DataTemplate>
                     <Border x:Name="TabChrome"
                             Tag="{Binding}"
                             Width="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=TabWidth}"
                             Height="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=TabHeight}"
-                            Margin="2"
                             Cursor="Arrow"
                             ToolTip="{Binding Title}"
-                            CornerRadius="4"
-                            Padding="4,2"
+                            CornerRadius="6"
+                            Padding="10,0,10,0"
                             AllowDrop="True"
+                            SnapsToDevicePixels="True"
+                            UseLayoutRounding="True"
+                            BorderThickness="1"
                             MouseEnter="Tab_MouseEnter"
+                            MouseLeave="Tab_MouseLeave"
                             PreviewMouseLeftButtonDown="Tab_PreviewMouseLeftButtonDown"
                             PreviewMouseMove="Tab_PreviewMouseMove"
                             PreviewMouseLeftButtonUp="Tab_PreviewMouseLeftButtonUp"
@@ -424,34 +438,39 @@
                             DragEnter="Tab_DragEnter"
                             DragLeave="Tab_DragLeave">
                         <Border.ContextMenu>
-                            <ContextMenu>
-                                <MenuItem Header="Close window"
+                            <ContextMenu Opened="TabContextMenu_Opened">
+                                <MenuItem x:Name="MenuPin"
+                                          Header="Pin"
+                                          Click="TabPin_Click" />
+                                <MenuItem x:Name="MenuMinimize"
+                                          Header="Minimize"
+                                          Click="TabMinimize_Click" />
+                                <Separator />
+                                <MenuItem x:Name="MenuCloseTab"
+                                          Header="Close"
                                           Click="TabClose_Click" />
                             </ContextMenu>
                         </Border.ContextMenu>
                         <!--
                           Layers (later triggers win):
                           1) Default light grey
-                          2) Active = always a quieter darker grey
-                          3) Hover/drag blue sits on top of either grey
+                          2) Active = quieter darker grey
+                          3) Hover accent on top
                         -->
                         <Border.Style>
                             <Style TargetType="Border">
-                                <Setter Property="Background" Value="#E8E8E8" />
-                                <Setter Property="BorderBrush" Value="#C8C8C8" />
+                                <Setter Property="Background" Value="{DynamicResource TabBgBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource TabBorderBrush}" />
+                                <!-- Keep thickness fixed so hover/active never change perceived gap -->
                                 <Setter Property="BorderThickness" Value="1" />
                                 <Style.Triggers>
-                                    <!-- Active base: grey only (never blue) -->
                                     <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                        <Setter Property="Background" Value="#D4D4D4" />
-                                        <Setter Property="BorderBrush" Value="#8E8E8E" />
-                                        <Setter Property="BorderThickness" Value="1.5" />
+                                        <Setter Property="Background" Value="{DynamicResource TabActiveBgBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource TabActiveBorderBrush}" />
                                     </DataTrigger>
-                                    <!-- Hover always paints blue on top of default OR active grey -->
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter Property="Background" Value="#D0E8FF" />
-                                        <Setter Property="BorderBrush" Value="#6BA3D6" />
-                                        <Setter Property="BorderThickness" Value="1.5" />
+                                        <Setter Property="Background" Value="{DynamicResource TabHoverBgBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource TabHoverBorderBrush}" />
                                     </Trigger>
                                 </Style.Triggers>
                             </Style>
@@ -459,31 +478,90 @@
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Image Grid.Column="0"
-                                   Source="{Binding Icon}"
-                                   Width="14"
-                                   Height="14"
-                                   Margin="0,0,4,0"
-                                   VerticalAlignment="Center"
-                                   Stretch="Uniform"
-                                   IsHitTestVisible="False"
-                                   RenderOptions.BitmapScalingMode="HighQuality" />
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding Title}"
+                            <!-- Pin marker -->
+                            <TextBlock Grid.Column="0"
+                                       FontFamily="{StaticResource FluentIconFont}"
+                                       Text="&#xE718;"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TabHoverBorderBrush}"
                                        VerticalAlignment="Center"
-                                       FontSize="11"
-                                       TextTrimming="CharacterEllipsis"
-                                       TextWrapping="NoWrap"
-                                       IsHitTestVisible="False">
+                                       Margin="0,0,4,0"
+                                       IsHitTestVisible="False"
+                                       ToolTip="Pinned">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="#444444" />
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <!-- App icon or placeholder glyph -->
+                            <Grid Grid.Column="1"
+                                  Width="16" Height="16"
+                                  Margin="0,0,8,0"
+                                  VerticalAlignment="Center">
+                                <Image Source="{Binding Icon}"
+                                       Width="16" Height="16"
+                                       Stretch="Uniform"
+                                       IsHitTestVisible="False"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       RenderOptions.EdgeMode="Aliased">
+                                    <Image.Style>
+                                        <Style TargetType="Image">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Icon}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Image.Style>
+                                </Image>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE8A5;"
+                                           FontSize="14"
+                                           Foreground="{DynamicResource ChromeIconBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Icon}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding Title}"
+                                       VerticalAlignment="Center"
+                                       FontFamily="Segoe UI Variable Text, Segoe UI"
+                                       FontSize="12"
+                                       LineHeight="16"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       TextTrimming="CharacterEllipsis"
+                                       TextWrapping="NoWrap"
+                                       IsHitTestVisible="False"
+                                       TextOptions.TextFormattingMode="Display"
+                                       TextOptions.TextRenderingMode="ClearType">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource TabTitleBrush}" />
                                         <Setter Property="FontWeight" Value="Normal" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsActive}" Value="True">
-                                                <Setter Property="Foreground" Value="#222222" />
+                                                <Setter Property="Foreground" Value="{DynamicResource TabTitleActiveBrush}" />
                                                 <Setter Property="FontWeight" Value="SemiBold" />
                                             </DataTrigger>
                                         </Style.Triggers>

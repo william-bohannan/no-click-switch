@@ -17,9 +17,13 @@ internal static class WindowEnumerator
     private const int WsExAppwindow = 0x00040000;
     private const uint GwOwner = 4;
 
-    public static IReadOnlyList<WindowEntry> GetOpenWindows(IntPtr excludeHwnd)
+    public static IReadOnlyList<WindowEntry> GetOpenWindows(
+        IntPtr excludeHwnd,
+        IReadOnlyList<ExcludeRule>? excludeRules = null,
+        MonitorInfo? onMonitor = null)
     {
         var results = new List<WindowEntry>();
+        var rules = excludeRules ?? Array.Empty<ExcludeRule>();
 
         EnumWindows((hWnd, _) =>
         {
@@ -30,11 +34,21 @@ internal static class WindowEnumerator
             if (string.IsNullOrWhiteSpace(title))
                 return true;
 
+            if (WindowExclude.IsExcluded(hWnd, title, rules))
+                return true;
+
+            // Per-monitor bars: only windows whose center sits on this display.
+            if (onMonitor is not null && !onMonitor.ContainsWindowCenter(hWnd))
+                return true;
+
+            var processName = WindowExclude.TryGetProcessNamePublic(hWnd);
+
             results.Add(new WindowEntry
             {
                 Handle = hWnd,
                 Title = title,
                 Icon = TryGetIcon(hWnd),
+                ProcessName = processName,
             });
 
             return true;

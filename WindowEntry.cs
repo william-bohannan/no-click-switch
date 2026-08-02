@@ -8,10 +8,14 @@ namespace NoClickSwitch;
 public sealed class WindowEntry : INotifyPropertyChanged
 {
     private bool _isActive;
+    private bool _isPinned;
     private string _title = "";
     private BitmapSource? _icon;
 
     public required IntPtr Handle { get; init; }
+
+    /// <summary>Process name without path (e.g. "chrome"), used for pin matching.</summary>
+    public string? ProcessName { get; set; }
 
     public required string Title
     {
@@ -46,6 +50,19 @@ public sealed class WindowEntry : INotifyPropertyChanged
             if (_isActive == value)
                 return;
             _isActive = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>Pinned favorites stay at the front of the strip.</summary>
+    public bool IsPinned
+    {
+        get => _isPinned;
+        set
+        {
+            if (_isPinned == value)
+                return;
+            _isPinned = value;
             OnPropertyChanged();
         }
     }

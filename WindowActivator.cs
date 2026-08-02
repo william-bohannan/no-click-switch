@@ -7,6 +7,7 @@ internal static class WindowActivator
     private const uint SwRestore = 9;
     private const uint SwShow = 5;
     private const uint SwShowNoActivate = 4;
+    private const uint SwMinimize = 6;
     private const uint WmClose = 0x0010;
 
     private static readonly IntPtr HwndTop = IntPtr.Zero;
@@ -41,6 +42,14 @@ internal static class WindowActivator
             return;
 
         _ = PostMessage(hWnd, WmClose, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    /// <summary>Minimize the window (SW_MINIMIZE).</summary>
+    public static void MinimizeWindow(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero || !IsWindow(hWnd))
+            return;
+        ShowWindow(hWnd, SwMinimize);
     }
 
     /// <summary>True while the HWND is still a live window.</summary>

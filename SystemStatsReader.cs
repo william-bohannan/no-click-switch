@@ -6,16 +6,22 @@ namespace NoClickSwitch;
 
 /// <summary>
 /// Samples CPU/MEM load, up to two fixed disks, and CPU/GPU temperatures.
+/// Use <see cref="Shared"/> so only one LibreHardwareMonitor <see cref="Computer"/> is opened.
 /// </summary>
 internal sealed class SystemStatsReader : IDisposable
 {
+    /// <summary>Process-wide reader (multiple bars must not each Open() LHM).</summary>
+    public static SystemStatsReader Shared { get; } = new();
+
     private long _idlePrev;
     private long _kernelPrev;
     private long _userPrev;
     private bool _cpuPrimed;
 
     private Computer? _computer;
-    private bool _tempsTried;
+    private bool _tempsOpenAttempted;
+    private int _tempsFailStreak;
+    private DateTime _nextTempRetryUtc = DateTime.MinValue;
 
     public int CpuPercent { get; private set; }
     public int MemPercent { get; private set; }
@@ -100,7 +106,6 @@ internal sealed class SystemStatsReader : IDisposable
 
         try
         {
-            // Prefer system drive first, then other fixed drives by letter.
             var systemRoot = Path.GetPathRoot(Environment.SystemDirectory)?.TrimEnd('\\') ?? "C:";
             var fixedDrives = DriveInfo.GetDrives()
                 .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
@@ -147,119 +152,199 @@ internal sealed class SystemStatsReader : IDisposable
         {
             CpuTempC = null;
             GpuTempC = null;
+            CpuTempToolTip = "CPU temperature: sensor unavailable";
+            GpuTempToolTip = "GPU temperature: sensor unavailable";
             return;
         }
 
         try
         {
-            float? cpu = null;
+            float? cpuPackage = null;
+            float? cpuAny = null;
+            var cpuCoreSum = 0f;
+            var cpuCoreCount = 0;
             float? gpu = null;
 
             foreach (var hardware in _computer.Hardware)
             {
                 hardware.Update();
-                VisitHardware(hardware, ref cpu, ref gpu);
+                CollectTemps(hardware, ref cpuPackage, ref cpuAny, ref cpuCoreSum, ref cpuCoreCount, ref gpu);
             }
+
+            float? cpu = cpuPackage;
+            if (cpu is null && cpuCoreCount > 0)
+                cpu = cpuCoreSum / cpuCoreCount;
+            if (cpu is null)
+                cpu = cpuAny;
 
             CpuTempC = cpu.HasValue ? (int)Math.Round(cpu.Value) : null;
             GpuTempC = gpu.HasValue ? (int)Math.Round(gpu.Value) : null;
 
             CpuTempToolTip = CpuTempC is int ct
                 ? $"CPU temperature: {ct}°C"
-                : "CPU temperature: unavailable";
+                : "CPU temperature: unavailable (no sensor found)";
             GpuTempToolTip = GpuTempC is int gt
                 ? $"GPU temperature: {gt}°C"
                 : "GPU temperature: unavailable";
+
+            if (CpuTempC is null && GpuTempC is null)
+            {
+                _tempsFailStreak++;
+                // After repeated empty reads, reopen LHM (driver init can lag at startup).
+                if (_tempsFailStreak >= 5)
+                {
+                    _tempsFailStreak = 0;
+                    ResetComputer();
+                }
+            }
+            else
+            {
+                _tempsFailStreak = 0;
+            }
         }
         catch
         {
             CpuTempC = null;
             GpuTempC = null;
+            ResetComputer();
         }
     }
 
-    private void VisitHardware(IHardware hardware, ref float? cpu, ref float? gpu)
+    private static void CollectTemps(
+        IHardware hardware,
+        ref float? cpuPackage,
+        ref float? cpuAny,
+        ref float cpuCoreSum,
+        ref int cpuCoreCount,
+        ref float? gpu)
     {
         foreach (var sub in hardware.SubHardware)
         {
             sub.Update();
-            VisitHardware(sub, ref cpu, ref gpu);
+            CollectTemps(sub, ref cpuPackage, ref cpuAny, ref cpuCoreSum, ref cpuCoreCount, ref gpu);
         }
+
+        var type = hardware.HardwareType;
+        var isCpuHw = type == HardwareType.Cpu;
+        var isGpuHw = type is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel;
+        var isBoardHw = type is HardwareType.Motherboard or HardwareType.SuperIO;
 
         foreach (var sensor in hardware.Sensors)
         {
             if (sensor.SensorType != SensorType.Temperature || sensor.Value is not float value)
                 continue;
-            if (float.IsNaN(value) || value <= 0 || value > 125)
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                continue;
+            // Plausible silicon range (°C). Allow slightly below ambient for weird chips.
+            if (value < 1 || value > 125)
                 continue;
 
             var name = sensor.Name ?? "";
 
-            if (hardware.HardwareType == HardwareType.Cpu)
+            if (isCpuHw || (isBoardHw && LooksLikeCpuSensor(name)))
             {
-                // Prefer package / Tctl over single cores.
-                if (name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                    || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-                    || name.Contains("Average", StringComparison.OrdinalIgnoreCase)
-                    || cpu is null)
+                if (IsCpuPackageSensor(name))
                 {
-                    if (name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                        || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-                        || name.Contains("Average", StringComparison.OrdinalIgnoreCase)
-                        || cpu is null
-                        || value > cpu.Value)
-                    {
-                        // Prefer named package sensors; otherwise take max core-ish reading carefully.
-                        if (name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                            || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-                            || name.Contains("Average", StringComparison.OrdinalIgnoreCase))
-                            cpu = value;
-                        else if (cpu is null)
-                            cpu = value;
-                    }
+                    // Prefer package / Tctl over whatever we had.
+                    if (cpuPackage is null || IsPreferredPackageName(name, cpuPackageName: true))
+                        cpuPackage = value;
+                    else if (value > cpuPackage)
+                        cpuPackage = value;
+                }
+                else if (IsCpuCoreSensor(name))
+                {
+                    cpuCoreSum += value;
+                    cpuCoreCount++;
+                    cpuAny ??= value;
+                    if (value > (cpuAny ?? 0))
+                        cpuAny = value;
+                }
+                else
+                {
+                    // Generic CPU die / temperature sensor.
+                    cpuAny ??= value;
+                    if (IsGenericCpuTempName(name))
+                        cpuPackage ??= value;
                 }
             }
-            else if (hardware.HardwareType is HardwareType.GpuNvidia
-                     or HardwareType.GpuAmd
-                     or HardwareType.GpuIntel)
+            else if (isGpuHw)
             {
                 if (name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                    || name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
-                    || name.Contains("Hotspot", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("GPU", StringComparison.OrdinalIgnoreCase)
                     || gpu is null)
                 {
-                    if (name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                        || gpu is null)
-                        gpu = value;
-                    else if (name.Contains("Hot", StringComparison.OrdinalIgnoreCase) && gpu is null)
+                    if (name.Contains("Core", StringComparison.OrdinalIgnoreCase) || gpu is null)
                         gpu = value;
                 }
             }
         }
     }
 
+    private static bool LooksLikeCpuSensor(string name)
+        => name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("CCD", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCpuPackageSensor(string name)
+        => name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("CCD", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Average", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("CPU", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("CPU Temperature", StringComparison.OrdinalIgnoreCase)
+           || (name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+               && !name.Contains("Core", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPreferredPackageName(string name, bool cpuPackageName)
+        => name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Tdie", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCpuCoreSensor(string name)
+        => name.Contains("Core", StringComparison.OrdinalIgnoreCase)
+           && !name.Contains("Package", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsGenericCpuTempName(string name)
+        => name.Contains("Temperature", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Temp", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Die", StringComparison.OrdinalIgnoreCase);
+
     private void EnsureComputer()
     {
-        if (_tempsTried)
+        if (_computer is not null)
             return;
-        _tempsTried = true;
 
+        if (_tempsOpenAttempted && DateTime.UtcNow < _nextTempRetryUtc)
+            return;
+
+        _tempsOpenAttempted = true;
         try
         {
+            // Motherboard/SuperIO often exposes CPU temp when CPU package is missing.
             _computer = new Computer
             {
                 IsCpuEnabled = true,
                 IsGpuEnabled = true,
+                IsMotherboardEnabled = true,
+                IsControllerEnabled = true,
+                IsMemoryEnabled = false,
+                IsNetworkEnabled = false,
+                IsStorageEnabled = false,
             };
             _computer.Open();
+            _tempsFailStreak = 0;
         }
         catch
         {
             _computer = null;
+            _nextTempRetryUtc = DateTime.UtcNow.AddSeconds(30);
         }
     }
 
-    public void Dispose()
+    private void ResetComputer()
     {
         try
         {
@@ -271,6 +356,21 @@ internal sealed class SystemStatsReader : IDisposable
         }
 
         _computer = null;
+        _tempsOpenAttempted = false;
+        _nextTempRetryUtc = DateTime.UtcNow.AddSeconds(5);
+    }
+
+    public void Dispose()
+    {
+        // Shared instance lives for the process; only close on explicit app shutdown.
+        if (!ReferenceEquals(this, Shared))
+            ResetComputer();
+    }
+
+    /// <summary>Called once when the app exits.</summary>
+    public static void ShutdownShared()
+    {
+        Shared.ResetComputer();
     }
 
     private static string FormatBytes(ulong bytes)

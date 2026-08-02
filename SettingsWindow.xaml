@@ -1,0 +1,536 @@
+<Window x:Class="NoClickSwitch.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings — No Click Switch"
+        Width="780"
+        Height="560"
+        MinWidth="640"
+        MinHeight="420"
+        WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="True"
+        Background="#F5F5F5"
+        FontFamily="Segoe UI">
+    <Window.Resources>
+        <FontFamily x:Key="FluentIconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+        <Style x:Key="NavIcon" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource FluentIconFont}" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Width" Value="22" />
+            <Setter Property="Margin" Value="0,0,10,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="#444444" />
+        </Style>
+        <Style x:Key="NavLabel" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="#1A1A1A" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+    </Window.Resources>
+    <DockPanel>
+        <!-- Title bar strip -->
+        <Border DockPanel.Dock="Top"
+                Background="#EDEDED"
+                BorderBrush="#D0D0D0"
+                BorderThickness="0,0,0,1"
+                Padding="16,12">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                           Text="&#xE713;"
+                           FontSize="20"
+                           Foreground="#1A1A1A"
+                           VerticalAlignment="Center"
+                           Margin="0,0,10,0" />
+                <StackPanel>
+                    <TextBlock Text="Settings"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="#1A1A1A" />
+                    <TextBlock Text="Customize the top bar. Changes apply immediately."
+                               FontSize="12"
+                               Foreground="#666666"
+                               Margin="0,2,0,0" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Footer -->
+        <Border DockPanel.Dock="Bottom"
+                Background="#EDEDED"
+                BorderBrush="#D0D0D0"
+                BorderThickness="0,1,0,0"
+                Padding="16,10">
+            <DockPanel>
+                <Button x:Name="ResetButton"
+                        DockPanel.Dock="Left"
+                        Content="Reset to defaults"
+                        Padding="12,6"
+                        Click="ResetButton_Click"
+                        ToolTip="Restore all customization defaults" />
+                <StackPanel DockPanel.Dock="Right"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right">
+                    <Button x:Name="CloseButton"
+                            Content="Close"
+                            Padding="18,6"
+                            IsDefault="True"
+                            Click="CloseButton_Click" />
+                </StackPanel>
+                <TextBlock x:Name="StatusText"
+                           VerticalAlignment="Center"
+                           Margin="16,0"
+                           FontSize="11"
+                           Foreground="#888888" />
+            </DockPanel>
+        </Border>
+
+        <!-- Body: left nav + right page -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left menu -->
+            <Border Grid.Column="0"
+                    Background="#E8E8E8"
+                    BorderBrush="#D0D0D0"
+                    BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="CUSTOMIZATION"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Foreground="#888888"
+                               Margin="14,14,14,6" />
+                    <!-- SelectionChanged is wired in code after init (avoids NRE while pages are still null). -->
+                    <ListBox x:Name="NavList"
+                             BorderThickness="0"
+                             Background="Transparent"
+                             Padding="6,0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="10,8" />
+                                <Setter Property="Margin" Value="0,1" />
+                                <Setter Property="Cursor" Value="Hand" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="Bd"
+                                                    Background="Transparent"
+                                                    CornerRadius="4"
+                                                    Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="#D8D8D8" />
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="#FFFFFF" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <!-- Glyphs: FullScreen, Color, Brightness, Stopwatch, Calculator, FontSize, QuietHours, Filter -->
+                        <ListBoxItem Tag="Mode">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE740;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Mode" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="Theme">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE790;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Theme" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="Appearance">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE706;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Opacity / blur" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="Hover">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE916;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Hover delay" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="Stats">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE9D9;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Stats" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="TabWidth">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE8E9;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Tab width" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="AutoHide">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE708;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Autohide" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="Exclude">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE71C;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Exclude list" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="Keyboard">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE765;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Keyboard" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="Monitors">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE7F4;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Monitors / tray" />
+                            </StackPanel>
+                        </ListBoxItem>
+                        <ListBoxItem Tag="Addons">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE71D;" />
+                                <TextBlock Style="{StaticResource NavLabel}" Text="Addons" />
+                            </StackPanel>
+                        </ListBoxItem>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- Right content -->
+            <ScrollViewer Grid.Column="1"
+                          VerticalScrollBarVisibility="Auto"
+                          Padding="20,16">
+                <Grid>
+                    <!-- Mode -->
+                    <StackPanel x:Name="PageMode" Visibility="Visible">
+                        <TextBlock Text="Mode" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Overall density of the bar chrome and spacing."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+                        <RadioButton x:Name="ModeStandard"
+                                     GroupName="Mode"
+                                     Content="Standard"
+                                     Margin="0,0,0,8"
+                                     Checked="Setting_Changed" />
+                        <TextBlock Text="Comfortable margins and padding (default)."
+                                   FontSize="11" Foreground="#888" Margin="22,0,0,12" />
+                        <RadioButton x:Name="ModeCompact"
+                                     GroupName="Mode"
+                                     Content="Compact"
+                                     Margin="0,0,0,8"
+                                     Checked="Setting_Changed" />
+                        <TextBlock Text="Smaller margins — more room for tabs."
+                                   FontSize="11" Foreground="#888" Margin="22,0,0,0" />
+                    </StackPanel>
+
+                    <!-- Theme -->
+                    <StackPanel x:Name="PageTheme" Visibility="Collapsed">
+                        <TextBlock Text="Theme" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Bar colors and the accent used for hover / active highlights."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+                        <RadioButton x:Name="ThemeLight" GroupName="Theme" Content="Light" Margin="0,0,0,8" Checked="Setting_Changed" />
+                        <RadioButton x:Name="ThemeDark" GroupName="Theme" Content="Dark" Margin="0,0,0,8" Checked="Setting_Changed" />
+                        <RadioButton x:Name="ThemeSystem" GroupName="Theme" Content="System" Margin="0,0,0,16" Checked="Setting_Changed" />
+                        <TextBlock Text="Follows Windows light / dark app mode."
+                                   FontSize="11" Foreground="#888" Margin="22,-12,0,16" />
+
+                        <TextBlock Text="Accent color" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Border x:Name="AccentPreview"
+                                    Width="28" Height="28"
+                                    CornerRadius="4"
+                                    BorderBrush="#AAA"
+                                    BorderThickness="1"
+                                    Margin="0,0,10,0"
+                                    VerticalAlignment="Center" />
+                            <TextBox x:Name="AccentHexBox"
+                                     Width="100"
+                                     VerticalAlignment="Center"
+                                     Padding="6,4"
+                                     LostFocus="AccentHexBox_LostFocus"
+                                     KeyDown="AccentHexBox_KeyDown" />
+                        </StackPanel>
+                        <WrapPanel x:Name="AccentSwatches" Margin="0,4,0,0" />
+                    </StackPanel>
+
+                    <!-- Opacity / blur (acrylic / mica) -->
+                    <StackPanel x:Name="PageAppearance" Visibility="Collapsed">
+                        <TextBlock Text="Opacity / blur" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Frost the bar with Windows backdrop materials when available (Mica / Acrylic), or a semi-transparent wash otherwise."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock DockPanel.Dock="Right" x:Name="OpacityValueText" Text="100%" Foreground="#555" />
+                            <TextBlock Text="Opacity (tint)" FontWeight="SemiBold" />
+                        </DockPanel>
+                        <Slider x:Name="OpacitySlider"
+                                Minimum="0.40" Maximum="1.0"
+                                TickFrequency="0.05"
+                                IsSnapToTickEnabled="True"
+                                ValueChanged="OpacitySlider_ValueChanged" />
+                        <TextBlock Text="How strong the color wash is over the desktop. Text stays sharp (does not fade)."
+                                   FontSize="11" Foreground="#888" Margin="0,4,0,18" TextWrapping="Wrap" />
+
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock DockPanel.Dock="Right" x:Name="BlurValueText" Text="0" Foreground="#555" />
+                            <TextBlock Text="Blur strength" FontWeight="SemiBold" />
+                        </DockPanel>
+                        <Slider x:Name="BlurSlider"
+                                Minimum="0" Maximum="100"
+                                TickFrequency="5"
+                                IsSnapToTickEnabled="True"
+                                ValueChanged="BlurSlider_ValueChanged" />
+                        <TextBlock x:Name="BlurHintText"
+                                   Text="0 = solid · 1–49 = Mica (Windows 11) · 50–100 = Acrylic. Windows 10 uses acrylic blur for any blur &gt; 0."
+                                   FontSize="11" Foreground="#888" Margin="0,4,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!-- Hover delay -->
+                    <StackPanel x:Name="PageHover" Visibility="Collapsed">
+                        <TextBlock Text="Hover delay" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="How long the pointer must rest on a tab before that window comes to the front. Critical for the no-click feel."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock DockPanel.Dock="Right" x:Name="HoverValueText" Text="Instant" Foreground="#555" />
+                            <TextBlock Text="Delay" FontWeight="SemiBold" />
+                        </DockPanel>
+                        <Slider x:Name="HoverSlider"
+                                Minimum="0" Maximum="1000"
+                                TickFrequency="25"
+                                IsSnapToTickEnabled="True"
+                                ValueChanged="HoverSlider_ValueChanged" />
+                        <TextBlock Text="0 ms = instant switch. Try 100–250 ms if tabs flip too eagerly while moving across the bar."
+                                   FontSize="11" Foreground="#888" Margin="0,8,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!-- Stats -->
+                    <StackPanel x:Name="PageStats" Visibility="Collapsed">
+                        <TextBlock Text="Stats" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Choose which system stats appear on the right side of the bar, and their order."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+
+                        <CheckBox x:Name="StatLoadCheck" Content="CPU / Memory %" Margin="0,0,0,6" Checked="Setting_Changed" Unchecked="Setting_Changed" />
+                        <CheckBox x:Name="StatDiskCheck" Content="Disk usage %" Margin="0,0,0,6" Checked="Setting_Changed" Unchecked="Setting_Changed" />
+                        <CheckBox x:Name="StatTempCheck" Content="CPU / GPU temperature" Margin="0,0,0,6" Checked="Setting_Changed" Unchecked="Setting_Changed" />
+                        <CheckBox x:Name="StatClockCheck" Content="Clock (time + date)" Margin="0,0,0,16" Checked="Setting_Changed" Unchecked="Setting_Changed" />
+
+                        <TextBlock Text="Order (Load / Disk / Temp)" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0" VerticalAlignment="Top">
+                                <Button Content="↑" Width="32" Margin="0,0,0,4" Click="StatMoveUp_Click" ToolTip="Move up" />
+                                <Button Content="↓" Width="32" Click="StatMoveDown_Click" ToolTip="Move down" />
+                            </StackPanel>
+                            <ListBox x:Name="StatsOrderList"
+                                     Height="100"
+                                     BorderBrush="#CCC"
+                                     BorderThickness="1" />
+                        </DockPanel>
+                    </StackPanel>
+
+                    <!-- Tab width -->
+                    <StackPanel x:Name="PageTabWidth" Visibility="Collapsed">
+                        <TextBlock Text="Tab width" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Width of each window tab (in em; 1em ≈ 16 pixels)."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock DockPanel.Dock="Right" x:Name="TabWidthValueText" Text="5.0 em (80 px)" Foreground="#555" />
+                            <TextBlock Text="Width" FontWeight="SemiBold" />
+                        </DockPanel>
+                        <Slider x:Name="TabWidthSlider"
+                                Minimum="3" Maximum="12"
+                                TickFrequency="0.5"
+                                IsSnapToTickEnabled="True"
+                                ValueChanged="TabWidthSlider_ValueChanged" />
+                    </StackPanel>
+
+                    <!-- Autohide -->
+                    <StackPanel x:Name="PageAutoHide" Visibility="Collapsed">
+                        <TextBlock Text="Autohide" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Whether the No Click Switch bar itself tucks away when you are not using it."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+                        <CheckBox x:Name="BarAutoHideCheck"
+                                  Content="Auto-hide the bar when not hovered"
+                                  Checked="Setting_Changed"
+                                  Unchecked="Setting_Changed" />
+                        <TextBlock Text="When enabled, the bar collapses to a thin top edge. Move the pointer to the top of the screen to show it again. (This is separate from the Windows taskbar auto-hide toggle on the bar.)"
+                                   FontSize="11" Foreground="#888" Margin="22,8,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!-- Exclude list -->
+                    <StackPanel x:Name="PageExclude" Visibility="Collapsed">
+                        <TextBlock Text="Exclude list" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Hide certain windows from the tab strip. Match by window title or process name (substring, case-insensitive)."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="120" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="ExcludeKindBox"
+                                      Grid.Column="0"
+                                      Margin="0,0,8,0"
+                                      SelectedIndex="0">
+                                <ComboBoxItem Content="Title" Tag="Title" />
+                                <ComboBoxItem Content="Process" Tag="Process" />
+                            </ComboBox>
+                            <TextBox x:Name="ExcludePatternBox"
+                                     Grid.Column="1"
+                                     Padding="6,4"
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="e.g. notepad or Settings" />
+                            <Button Grid.Column="2"
+                                    Content="Add"
+                                    Margin="8,0,0,0"
+                                    Padding="14,4"
+                                    Click="ExcludeAdd_Click" />
+                        </Grid>
+
+                        <ListBox x:Name="ExcludeListBox"
+                                 Height="220"
+                                 BorderBrush="#CCC"
+                                 BorderThickness="1"
+                                 DisplayMemberPath="Display" />
+                        <Button Content="Remove selected"
+                                HorizontalAlignment="Left"
+                                Margin="0,8,0,0"
+                                Padding="10,4"
+                                Click="ExcludeRemove_Click" />
+                    </StackPanel>
+
+                    <!-- Keyboard -->
+                    <StackPanel x:Name="PageKeyboard" Visibility="Collapsed">
+                        <TextBlock Text="Keyboard" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Jump to tabs with global hotkeys. Pin favorites from a tab’s right-click menu so they stay first."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+                        <CheckBox x:Name="HotkeysCheck"
+                                  Content="Enable tab hotkeys (Ctrl+Alt+1 … Ctrl+Alt+0)"
+                                  Margin="0,0,0,8"
+                                  Checked="Setting_Changed"
+                                  Unchecked="Setting_Changed" />
+                        <TextBlock Text="Ctrl+Alt+1 focuses the first tab, Ctrl+Alt+2 the second, … Ctrl+Alt+0 the tenth."
+                                   FontSize="11" Foreground="#888" Margin="22,0,0,12" TextWrapping="Wrap" />
+                        <CheckBox x:Name="WinNumberCheck"
+                                  Content="Also register Win+1 … Win+0"
+                                  Margin="0,0,0,8"
+                                  Checked="Setting_Changed"
+                                  Unchecked="Setting_Changed" />
+                        <TextBlock Text="Windows often reserves Win+number for the taskbar, so this may not fire. Prefer Ctrl+Alt+digit."
+                                   FontSize="11" Foreground="#888" Margin="22,0,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!-- Monitors / tray -->
+                    <StackPanel x:Name="PageMonitors" Visibility="Collapsed">
+                        <TextBlock Text="Monitors / tray" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Where the bar appears and how to show it again from the system tray."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+
+                        <TextBlock Text="Bar placement" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <RadioButton x:Name="MonitorPrimary"
+                                     GroupName="Monitors"
+                                     Content="Primary monitor only"
+                                     Margin="0,0,0,6"
+                                     Checked="Setting_Changed" />
+                        <TextBlock Text="One bar on the main display; lists all windows."
+                                   FontSize="11" Foreground="#888" Margin="22,0,0,10" />
+                        <RadioButton x:Name="MonitorAll"
+                                     GroupName="Monitors"
+                                     Content="One bar per monitor"
+                                     Margin="0,0,0,6"
+                                     Checked="Setting_Changed" />
+                        <TextBlock Text="Each display gets a bar listing windows whose center is on that screen."
+                                   FontSize="11" Foreground="#888" Margin="22,0,0,16" />
+
+                        <TextBlock Text="System tray" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <CheckBox x:Name="TrayCheck"
+                                  Content="Show tray icon (Show/Hide bar, Settings, Exit)"
+                                  Checked="Setting_Changed"
+                                  Unchecked="Setting_Changed" />
+                        <TextBlock Text="When enabled, closing the bar hides it instead of quitting — use Exit on the tray menu to leave."
+                                   FontSize="11" Foreground="#888" Margin="22,8,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!-- Addons -->
+                    <StackPanel x:Name="PageAddons" Visibility="Collapsed">
+                        <TextBlock Text="Addons" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
+                        <TextBlock Text="Optional tools that can appear on the bar next to Terminal when installed."
+                                   FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
+
+                        <!-- Flameshot card -->
+                        <Border BorderBrush="#D0D0D0"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Background="#FAFAFA"
+                                Padding="14,12"
+                                Margin="0,0,0,12">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                               Text="&#xE7A8;"
+                                               FontSize="18"
+                                               Foreground="#333"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0" />
+                                    <TextBlock Text="Flameshot"
+                                               FontSize="14"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center"
+                                               Foreground="#1A1A1A" />
+                                </StackPanel>
+                                <TextBlock Text="Powerful screenshot tool. The bar icon opens Flameshot’s capture UI (flameshot gui)."
+                                           FontSize="12"
+                                           Foreground="#666"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,10" />
+                                <TextBlock x:Name="FlameshotStatusText"
+                                           Text="Status: …"
+                                           FontSize="12"
+                                           Foreground="#444"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,10" />
+                                <CheckBox x:Name="FlameshotShowCheck"
+                                          Content="Show icon on the bar (right of Terminal) when installed"
+                                          Margin="0,0,0,10"
+                                          Checked="Setting_Changed"
+                                          Unchecked="Setting_Changed" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="FlameshotInstallButton"
+                                            Content="Install with winget"
+                                            Padding="12,6"
+                                            Margin="0,0,8,0"
+                                            Click="FlameshotInstall_Click"
+                                            ToolTip="Runs PowerShell + winget install Flameshot.Flameshot (or Chocolatey if winget is missing)" />
+                                    <Button x:Name="FlameshotUninstallButton"
+                                            Content="Uninstall"
+                                            Padding="12,6"
+                                            Margin="0,0,8,0"
+                                            Click="FlameshotUninstall_Click"
+                                            ToolTip="Runs PowerShell + winget uninstall Flameshot.Flameshot" />
+                                    <Button x:Name="FlameshotRefreshButton"
+                                            Content="Refresh status"
+                                            Padding="12,6"
+                                            Click="FlameshotRefresh_Click" />
+                                </StackPanel>
+                                <TextBlock Text="Install / uninstall open a PowerShell window (winget or Chocolatey). When it finishes, click Refresh status."
+                                           FontSize="11"
+                                           Foreground="#888"
+                                           Margin="0,8,0,0"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
+    </DockPanel>
+</Window>

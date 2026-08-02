@@ -47,14 +47,26 @@ You can also use **Uninstall** from the app’s ☰ menu.
 - **Drag tabs** to reorder; order is **kept** when the list refreshes
 - Each tab is **5em wide × 2em tall** (80 × 32 DIP at 16px em)
 - Tabs **wrap** when they exceed the screen width; the bar **grows in height** (no fixed outer height)
-- Left: **menu (☰)**, **Start**, **File Explorer**
+- Left: **menu (☰)**, **Start**, **File Explorer**, **Windows Terminal**
 - Right: compact stats (**CPU/MEM %**, **up to 2 disks %**, **CPU/GPU °C**), **auto-hide**, **clock**
 - Disks: first two fixed drives (system drive preferred); 2nd row only if present
 - Temps via LibreHardwareMonitor (GPU row only if a sensor is found)
-- **Menu**: Close, About (GitHub), Install / Uninstall, version, **No Click Switch (NCS)**
+- **Menu (☰)**:
+  - **Settings** → customization (left nav + right form)
+  - **Install** / **Uninstall**
+  - App name, version, **GitHub**, **Website**
+  - **Close**
+- **Settings** (Customization): mode, theme, opacity/blur (Mica/Acrylic), hover delay, stats, tab width, bar auto-hide, exclude list, **keyboard**, **monitors / tray**, **addons**. Stored in `%LocalAppData%\NoClickSwitch\settings.json`
+- **Addons**: optional tools on the bar. **Flameshot** — icon right of Terminal when installed; **Install** / **Uninstall** via Settings (PowerShell + winget)
+- **Tab context menu**: Pin / Unpin, Minimize, Close
+- **Pinned** processes stay at the front of the strip (pin from the tab menu)
+- **Hotkeys**: Ctrl+Alt+1…9 and Ctrl+Alt+0 jump to tabs 1–10 (optional Win+1…0; shell may override)
+- **Multi-monitor**: primary-only bar (all windows) or one bar per monitor (windows on that display)
+- **Tray**: Show/Hide bar, Settings, Exit (closing the bar hides it when the tray icon is enabled)
 - **Install** (in-app): copies the app to `%LocalAppData%\NoClickSwitch` and adds **auto-start on login** (current user)
 - **Uninstall**: removes auto-start and installed files (shown only when installed)
-- Explorer icon opens **File Explorer**
+- Explorer icon opens **File Explorer**; **Ctrl+click** opens elevated (UAC)
+- Terminal icon opens **Windows Terminal** (falls back to PowerShell / cmd); **Ctrl+click** opens elevated (UAC)
 - Windows logo opens the **Start** menu
 - Clock shows **time on top, date on bottom** (updates every second)
 - Opening the bar **enables** Windows taskbar auto-hide

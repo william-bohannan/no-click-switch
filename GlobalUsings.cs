@@ -1,0 +1,22 @@
+// Prefer WPF types when both WPF and Windows Forms are referenced.
+global using Application = System.Windows.Application;
+global using Brush = System.Windows.Media.Brush;
+global using Color = System.Windows.Media.Color;
+global using ColorConverter = System.Windows.Media.ColorConverter;
+global using Cursors = System.Windows.Input.Cursors;
+global using DataFormats = System.Windows.DataFormats;
+global using DataObject = System.Windows.DataObject;
+global using DragDropEffects = System.Windows.DragDropEffects;
+global using DragEventArgs = System.Windows.DragEventArgs;
+global using FontFamily = System.Windows.Media.FontFamily;
+global using GiveFeedbackEventArgs = System.Windows.GiveFeedbackEventArgs;
+global using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+global using MessageBox = System.Windows.MessageBox;
+global using MessageBoxButton = System.Windows.MessageBoxButton;
+global using MessageBoxImage = System.Windows.MessageBoxImage;
+global using MessageBoxResult = System.Windows.MessageBoxResult;
+global using MouseButtonEventArgs = System.Windows.Input.MouseButtonEventArgs;
+global using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+global using Point = System.Windows.Point;
+global using Rect = System.Windows.Rect;
+global using Size = System.Windows.Size;
