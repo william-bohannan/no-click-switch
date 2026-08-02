@@ -1695,21 +1695,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Rectangle under this bar, full primary width, down to the work-area bottom.
+    /// Rectangle under this bar, full monitor width, down to the usable bottom.
+    /// When the Windows taskbar is auto-hidden, uses the full monitor bottom —
+    /// <see cref="SystemParameters.WorkArea"/> / <c>rcWork</c> often still reserves
+    /// taskbar height even with auto-hide on, which left a gap above the edge.
     /// Values are device pixels for Win32 SetWindowPos.
     /// </summary>
     private (int X, int Y, int Width, int Height) GetFreeSpaceBelowBarInDevicePixels()
     {
+        // Refresh monitor metrics so work/bounds match current taskbar state.
+        RefreshMonitorGeometry();
+
         var work = GetWorkAreaDip();
+        var bounds = GetMonitorBoundsDip();
+
+        // Horizontal: stay on this bar's monitor. With auto-hide, prefer full
+        // monitor width (side taskbars should not permanently reserve space).
+        var autoHide = IsTaskbarAutoHideActive();
+        var areaLeft = autoHide ? bounds.Left : work.Left;
+        var areaWidth = autoHide ? bounds.Width : work.Width;
+        var areaBottom = autoHide ? bounds.Bottom : work.Bottom;
 
         var barHeight = ActualHeight > 0 ? ActualHeight : Height;
         if (barHeight <= 0)
             barHeight = TabHeight + 12;
 
         var dipLeft = Left;
+        // Prefer bar left if it is already aligned; otherwise use area left.
+        if (Math.Abs(dipLeft - areaLeft) > 1)
+            dipLeft = areaLeft;
+
         var dipTop = Top + barHeight;
-        var dipWidth = work.Width;
-        var dipHeight = work.Bottom - dipTop;
+        var dipWidth = areaWidth;
+        var dipHeight = areaBottom - dipTop;
         if (dipHeight < 1)
             dipHeight = 1;
 
@@ -1726,6 +1744,68 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var h = (int)Math.Round(bottomRight.Y - topLeft.Y);
 
         return (x, y, Math.Max(1, w), Math.Max(1, h));
+    }
+
+    /// <summary>True when the shell taskbar is in auto-hide mode (or our toggle wants it on).</summary>
+    private bool IsTaskbarAutoHideActive()
+    {
+        try
+        {
+            if (TaskbarAutoHideToggle?.IsChecked == true)
+                return true;
+            return TaskbarAutoHide.IsEnabled;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Re-read this bar's monitor bounds/work area from the system.</summary>
+    private void RefreshMonitorGeometry()
+    {
+        try
+        {
+            var all = MonitorInfo.GetAll();
+            var match = all.FirstOrDefault(m =>
+                string.Equals(m.DeviceName, _monitor.DeviceName, StringComparison.OrdinalIgnoreCase));
+            if (match is null && _monitor.IsPrimary)
+                match = all.FirstOrDefault(m => m.IsPrimary);
+            if (match is not null)
+                _monitor = match;
+        }
+        catch
+        {
+            // keep previous metrics
+        }
+    }
+
+    private Rect GetMonitorBoundsDip()
+    {
+        try
+        {
+            var source = PresentationSource.FromVisual(this);
+            var toDip = source?.CompositionTarget?.TransformFromDevice;
+            if (toDip is { } m)
+            {
+                var px = _monitor.BoundsPx;
+                var tl = m.Transform(new Point(px.X, px.Y));
+                var br = m.Transform(new Point(px.X + px.Width, px.Y + px.Height));
+                return new Rect(tl, br);
+            }
+        }
+        catch
+        {
+            // fall through
+        }
+
+        // BoundsPx is device pixels; convert with work-area DIP scale as fallback.
+        var work = _monitor.WorkAreaDip;
+        var workPx = _monitor.WorkAreaPx;
+        var scaleX = workPx.Width > 0 ? work.Width / workPx.Width : 1.0;
+        var scaleY = workPx.Height > 0 ? work.Height / workPx.Height : 1.0;
+        var b = _monitor.BoundsPx;
+        return new Rect(b.X * scaleX, b.Y * scaleY, b.Width * scaleX, b.Height * scaleY);
     }
 
     private bool _appMenuOpen;
