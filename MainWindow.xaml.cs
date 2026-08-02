@@ -1880,7 +1880,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (MenuUninstall is not null)
             MenuUninstall.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
         if (MenuAppName is not null)
+        {
             MenuAppName.Header = $"{AppInstaller.DisplayName} ({AppInstaller.ShortName})";
+            MenuAppName.ToolTip = "Check for updates";
+            MenuAppName.IsEnabled = true;
+        }
         if (MenuVersion is not null)
             MenuVersion.Header = $"Version {AppInstaller.VersionString}";
         if (MenuGitHub is not null)
@@ -1913,6 +1917,67 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private async void MenuAppName_Click(object sender, RoutedEventArgs e)
+    {
+        if (MenuAppName is not null)
+        {
+            MenuAppName.IsEnabled = false;
+            MenuAppName.ToolTip = "Checking for updates…";
+        }
+        if (MenuVersion is not null)
+            MenuVersion.Header = "Checking for updates…";
+
+        try
+        {
+            // Explicit user request — always hit GitHub (not the 30‑minute throttle).
+            await AppUpdateChecker.CheckAsync().ConfigureAwait(true);
+            RefreshAppMenu();
+
+            if (AppUpdateChecker.IsUpdateAvailable
+                && AppUpdateChecker.AvailableVersion is { } remote)
+            {
+                var tag = AppUpdateChecker.AvailableTag ?? remote;
+                var upgrade = MessageBox.Show(
+                    $"A newer version is available: {tag}\n\n" +
+                    $"(Current: {AppInstaller.VersionString})\n\n" +
+                    "Upgrade now?",
+                    AppInstaller.DisplayName,
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (upgrade == MessageBoxResult.Yes)
+                    await RunUpgradeAsync(sender as MenuItem).ConfigureAwait(true);
+            }
+            else
+            {
+                MessageBox.Show(
+                    $"You're up to date.\n\nCurrent version: {AppInstaller.VersionString}",
+                    AppInstaller.DisplayName,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Could not check for updates.\n\n" +
+                $"{ex.Message}\n\n" +
+                "Check your network connection, or open GitHub from this menu.",
+                AppInstaller.DisplayName,
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            RefreshAppMenu();
+        }
+        finally
+        {
+            if (MenuAppName is not null)
+            {
+                MenuAppName.IsEnabled = true;
+                MenuAppName.ToolTip = "Check for updates";
+            }
+        }
+    }
+
     private async void MenuUpgrade_Click(object sender, RoutedEventArgs e)
     {
         var remote = AppUpdateChecker.AvailableVersion ?? "latest";
@@ -1930,9 +1995,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (result != MessageBoxResult.Yes)
             return;
 
-        // Disable double-clicks while downloading.
-        if (sender is MenuItem mi)
-            mi.IsEnabled = false;
+        await RunUpgradeAsync(sender as MenuItem).ConfigureAwait(true);
+    }
+
+    private async Task RunUpgradeAsync(MenuItem? sourceMenuItem)
+    {
+        if (sourceMenuItem is not null)
+            sourceMenuItem.IsEnabled = false;
 
         try
         {
@@ -1941,6 +2010,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 // Best-effort status via menu tooltip while download runs.
                 if (MenuUpgrade is not null)
                     MenuUpgrade.ToolTip = msg;
+                if (MenuAppName is not null)
+                    MenuAppName.ToolTip = msg;
             });
 
             await AppUpdateChecker.StartUpgradeAsync(progress).ConfigureAwait(true);
@@ -1961,8 +2032,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
 
-            if (sender is MenuItem mi2)
-                mi2.IsEnabled = true;
+            if (sourceMenuItem is not null)
+                sourceMenuItem.IsEnabled = true;
             RefreshAppMenu();
         }
     }

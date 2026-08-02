@@ -140,7 +140,8 @@
                         <Separator />
                         <MenuItem x:Name="MenuAppName"
                                   Header="No Click Switch (NCS)"
-                                  IsEnabled="False">
+                                  Click="MenuAppName_Click"
+                                  ToolTip="Check for updates">
                             <MenuItem.Icon>
                                 <TextBlock FontFamily="{StaticResource FluentIconFont}"
                                            Text="&#xE946;" FontSize="16"
