@@ -399,12 +399,25 @@ internal static class FlameshotAddon
     {
         try
         {
-            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+            // Write a local .ps1 and run with -File (not -EncodedCommand).
+            // Encoded commands are a common malware signal for Windows Defender.
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                AppInstaller.AppName,
+                "Addons");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "Flameshot-Setup.ps1");
+            var header =
+                "# No Click Switch — Flameshot addon helper\n" +
+                "# Local script written by NoClickSwitch. Not downloaded from the internet.\n\n";
+            File.WriteAllText(path, header + script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
             Process.Start(new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{path}\"",
                 UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Normal,
             });
             return true;
         }

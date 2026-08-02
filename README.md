@@ -75,6 +75,37 @@ You can also use **Uninstall** from the app’s ☰ menu.
 - Closing the bar **restores the taskbar** (auto-hide off)
 - Window list refreshes about every 1.5 seconds
 
+## Windows Security / SmartScreen
+
+No Click Switch is a small **unsigned** open-source utility. It controls windows (bring-to-front, hotkeys) and can download updates from **GitHub Releases**. Microsoft Defender’s machine-learning models sometimes flag that combination as a threat (names vary — e.g. “behavior”, “command line”, “Wacatac”, etc.). That is a **false positive**, not a real trojan.
+
+### Allow the app (recommended)
+
+1. Open **Windows Security** → **Virus & threat protection** → **Protection history**
+2. Find the block for **NoClickSwitch** / the zip
+3. Choose **Actions** → **Allow** (or restore)
+4. Optionally add an exclusion:  
+   **Virus & threat protection** → **Manage settings** → **Exclusions** →  
+   folder `%LocalAppData%\NoClickSwitch`
+
+### SmartScreen “Windows protected your PC”
+
+1. Click **More info**
+2. Click **Run anyway**
+
+### Report a false positive (helps everyone)
+
+- [Microsoft Security Intelligence — submit a file](https://www.microsoft.com/en-us/wdsi/filesubmission)  
+  Submit `NoClickSwitch.exe` or the release zip as a **software developer** false positive.
+
+### What we do to reduce flags
+
+- Upgrades download the **official GitHub zip in-app** (no `irm | iex` remote PowerShell)
+- Helper scripts are written **locally** and run with `powershell -File` (not `-EncodedCommand`)
+- Release packages are **multi-file** self-contained builds (not a single packed exe)
+
+Long-term fix is a paid **code-signing certificate** (Authenticode), which we may add later.
+
 ## Requirements
 
 - Windows 10/11
@@ -93,15 +124,14 @@ dotnet run --project NoClickSwitch.csproj
 dotnet build NoClickSwitch.csproj -c Release
 ```
 
-Self-contained package (same layout as GitHub Releases):
+Self-contained package (same layout as GitHub Releases — multi-file, not single-file):
 
 ```powershell
 dotnet publish NoClickSwitch.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=true `
-  -p:IncludeNativeLibrariesForSelfExtract=true `
-  -p:EnableCompressionInSingleFile=true `
   -o publish
 ```
+
+Zip the `publish` folder contents as `NoClickSwitch-win-x64.zip` for the release asset.
 
 ## Brand assets
 

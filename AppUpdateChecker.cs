@@ -133,7 +133,6 @@ internal static class AppUpdateChecker
                 if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                // Prefer win-x64 / NoClickSwitch zip names (same as install.ps1).
                 var preferred = name.Contains("win-x64", StringComparison.OrdinalIgnoreCase)
                                 || name.Contains("NoClickSwitch", StringComparison.OrdinalIgnoreCase);
                 if (!preferred && downloadUrl is not null)
@@ -192,9 +191,8 @@ internal static class AppUpdateChecker
     }
 
     /// <summary>
-    /// Download the release zip in-process, stage files, then run a local CMD helper
-    /// to replace the install after this process exits and relaunch.
-    /// Does <b>not</b> use remote PowerShell (<c>irm | iex</c>), which Defender often blocks.
+    /// Download the GitHub release zip in-process, then run a local PowerShell <c>-File</c>
+    /// helper (not remote, not encoded) to copy files after this process exits.
     /// </summary>
     public static async Task StartUpgradeAsync(IProgress<string>? progress = null, CancellationToken ct = default)
     {
@@ -215,16 +213,19 @@ internal static class AppUpdateChecker
                 "No download URL found for the latest release. " +
                 "Open the Releases page on GitHub and install manually.");
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), "NoClickSwitch-update");
+        var tempRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            AppInstaller.AppName,
+            "Update");
         Directory.CreateDirectory(tempRoot);
-        var zipPath = Path.Combine(tempRoot, "NoClickSwitch-win-x64.zip");
-        var extractDir = Path.Combine(tempRoot, "extract-" + Guid.NewGuid().ToString("N"));
-        var applyCmd = Path.Combine(tempRoot, "apply-update.cmd");
 
-        progress?.Report($"Downloading {tag ?? "latest"}…");
+        var zipPath = Path.Combine(tempRoot, "NoClickSwitch-win-x64.zip");
+        var extractDir = Path.Combine(tempRoot, "extract");
+        var applyPs1 = Path.Combine(tempRoot, "Apply-NoClickSwitchUpdate.ps1");
+
+        progress?.Report($"Downloading {tag ?? "latest"} from GitHub…");
         using (var dl = CreateClient(TimeSpan.FromMinutes(15)))
         {
-            // browser_download_url is a normal HTTPS file URL (not the API).
             using var response = await dl.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct)
                 .ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
@@ -238,7 +239,6 @@ internal static class AppUpdateChecker
             Directory.Delete(extractDir, recursive: true);
         ZipFile.ExtractToDirectory(zipPath, extractDir);
 
-        // Support flat zip or single top-level folder.
         var sourceDir = extractDir;
         var children = Directory.GetFileSystemEntries(extractDir);
         if (children.Length == 1 && Directory.Exists(children[0]))
@@ -253,56 +253,65 @@ internal static class AppUpdateChecker
         var installedExe = AppInstaller.InstalledExePath;
         var pid = Environment.ProcessId;
 
-        progress?.Report("Preparing updater…");
-        // Local batch only — no network, no PowerShell. Waits for us to exit, then copies + restarts.
-        var cmd = new StringBuilder();
-        cmd.AppendLine("@echo off");
-        cmd.AppendLine("setlocal");
-        cmd.AppendLine("title No Click Switch Update");
-        cmd.AppendLine("echo.");
-        cmd.AppendLine("echo   No Click Switch — applying update...");
-        cmd.AppendLine("echo.");
-        cmd.AppendLine($":wait");
-        cmd.AppendLine($"tasklist /FI \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul");
-        cmd.AppendLine("if not errorlevel 1 (");
-        cmd.AppendLine("  timeout /t 1 /nobreak >nul");
-        cmd.AppendLine("  goto wait");
-        cmd.AppendLine(")");
-        cmd.AppendLine("timeout /t 1 /nobreak >nul");
-        cmd.AppendLine($"if not exist \"{installDir}\" mkdir \"{installDir}\"");
-        // /E copy tree, /Y overwrite, /I assume dest is directory, /Q quiet
-        cmd.AppendLine($"xcopy /E /Y /I /Q \"{sourceDir}\\*\" \"{installDir}\\\" >nul");
-        if (!File.Exists(Path.Combine(installDir, $"{AppInstaller.AppName}.exe")))
-        {
-            // still write check in script
-        }
+        progress?.Report("Starting local update helper…");
 
-        cmd.AppendLine($"if not exist \"{installedExe}\" (");
-        cmd.AppendLine("  echo   Update failed: exe missing after copy.");
-        cmd.AppendLine("  pause");
-        cmd.AppendLine("  exit /b 1");
-        cmd.AppendLine(")");
-        cmd.AppendLine(
-            $"reg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v {AppInstaller.AppName} /t REG_SZ /d \"\\\"{installedExe}\\\"\" /f >nul");
-        cmd.AppendLine($"start \"\" \"{installedExe}\"");
-        cmd.AppendLine($"rd /s /q \"{extractDir}\" 2>nul");
-        cmd.AppendLine($"del /f /q \"{zipPath}\" 2>nul");
-        cmd.AppendLine("echo   Update complete.");
-        cmd.AppendLine("timeout /t 2 /nobreak >nul");
-        cmd.AppendLine("del /f /q \"%~f0\" 2>nul");
+        // Clear, readable local script — no encoding, no network, product-branded.
+        var ps = new StringBuilder();
+        ps.AppendLine("#Requires -Version 5.1");
+        ps.AppendLine("#");
+        ps.AppendLine("# No Click Switch (NCS) — local update helper");
+        ps.AppendLine("# Written by NoClickSwitch.exe during Upgrade.");
+        ps.AppendLine("# This script does NOT download anything. It only copies files");
+        ps.AppendLine("# already fetched from https://github.com/william-bohannan/no-click-switch");
+        ps.AppendLine("#");
+        ps.AppendLine($"$ErrorActionPreference = 'Stop'");
+        ps.AppendLine($"$PidToWait = {pid}");
+        ps.AppendLine($"$Source = '{EscapePs(sourceDir)}'");
+        ps.AppendLine($"$Dest = '{EscapePs(installDir)}'");
+        ps.AppendLine($"$Exe = '{EscapePs(installedExe)}'");
+        ps.AppendLine("");
+        ps.AppendLine("Write-Host ''");
+        ps.AppendLine("Write-Host '  No Click Switch — applying update' -ForegroundColor Cyan");
+        ps.AppendLine("Write-Host '  https://github.com/william-bohannan/no-click-switch' -ForegroundColor DarkGray");
+        ps.AppendLine("Write-Host ''");
+        ps.AppendLine("Write-Host '  Waiting for the old process to exit...' -ForegroundColor DarkGray");
+        ps.AppendLine("try { Wait-Process -Id $PidToWait -Timeout 60 -ErrorAction SilentlyContinue } catch { }");
+        ps.AppendLine("Start-Sleep -Seconds 1");
+        ps.AppendLine("");
+        ps.AppendLine("Write-Host \"  Installing to $Dest\" -ForegroundColor DarkGray");
+        ps.AppendLine("New-Item -ItemType Directory -Force -Path $Dest | Out-Null");
+        ps.AppendLine("Copy-Item -Path (Join-Path $Source '*') -Destination $Dest -Recurse -Force");
+        ps.AppendLine("");
+        ps.AppendLine("if (-not (Test-Path -LiteralPath $Exe)) {");
+        ps.AppendLine("  Write-Host '  Update failed: executable missing after copy.' -ForegroundColor Red");
+        ps.AppendLine("  Read-Host 'Press Enter to close'");
+        ps.AppendLine("  exit 1");
+        ps.AppendLine("}");
+        ps.AppendLine("");
+        ps.AppendLine("# Auto-start on login (current user only)");
+        ps.AppendLine("$runKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'");
+        ps.AppendLine("New-Item -Path $runKey -Force | Out-Null");
+        ps.AppendLine("Set-ItemProperty -Path $runKey -Name 'NoClickSwitch' -Value ('\"' + $Exe + '\"')");
+        ps.AppendLine("");
+        ps.AppendLine("Write-Host '  Starting No Click Switch...' -ForegroundColor Green");
+        ps.AppendLine("Start-Process -FilePath $Exe");
+        ps.AppendLine("Write-Host '  Update complete.' -ForegroundColor Green");
+        ps.AppendLine("Start-Sleep -Seconds 2");
 
-        await File.WriteAllTextAsync(applyCmd, cmd.ToString(), Encoding.ASCII, ct).ConfigureAwait(false);
+        await File.WriteAllTextAsync(applyPs1, ps.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), ct)
+            .ConfigureAwait(false);
 
-        progress?.Report("Restarting to finish update…");
+        // -File (not -EncodedCommand): clearer to the user and less "script malware"-like.
         Process.Start(new ProcessStartInfo
         {
-            FileName = applyCmd,
+            FileName = "powershell.exe",
+            Arguments =
+                $"-NoProfile -ExecutionPolicy Bypass -File \"{applyPs1}\"",
             WorkingDirectory = tempRoot,
             UseShellExecute = true,
             WindowStyle = ProcessWindowStyle.Normal,
         });
 
-        // Allow updater to replace files.
         await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
             try
@@ -317,4 +326,7 @@ internal static class AppUpdateChecker
             System.Windows.Application.Current.Shutdown();
         });
     }
+
+    private static string EscapePs(string path)
+        => path.Replace("'", "''");
 }

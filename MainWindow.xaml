@@ -148,7 +148,7 @@
                             </MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="MenuVersion"
-                                  Header="1.1.2"
+                                  Header="1.1.3"
                                   IsEnabled="False" />
                         <MenuItem x:Name="MenuGitHub"
                                   Header="GitHub"
