@@ -9,8 +9,6 @@ A minimal always-on-top Windows top bar that shows **one tab per open window**.
 | **Website** | https://noclickswitch.com *(coming soon)* |
 | **Install path** | `%LocalAppData%\NoClickSwitch` |
 
-> Formerly **Switched Bar** (`william-bohannan/switchedbar`). The install script removes any legacy Switched Bar install when you install NCS.
-
 ## Install (Windows)
 
 No admin rights. Installs to `%LocalAppData%\NoClickSwitch`, starts with Windows (current user), and launches the app.
