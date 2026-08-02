@@ -1,7 +1,7 @@
-﻿<Window x:Class="SwiztchBar.MainWindow"
+<Window x:Class="SwitchedBar.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Swiztch Bar"
+        Title="Switched Bar"
         WindowStyle="None"
         ResizeMode="NoResize"
         SizeToContent="Height"
@@ -17,12 +17,98 @@
           Right controls: height matches one tab row and stays on the first row
           (Top + same vertical inset as TabsList/tab margins). Icons centered in that row.
         -->
+        <!-- Right: CPU | MEM | HDD | auto-hide | menu | explorer | Start | clock -->
         <StackPanel DockPanel.Dock="Right"
                     Orientation="Horizontal"
                     VerticalAlignment="Top"
                     Height="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=TabHeight}"
                     Margin="0,6,6,0">
-            <!-- Taskbar auto-hide -->
+            <!--
+              Compact stats (3 vertical stacks):
+              1) CPU% / MEM%
+              2) HDD0% / HDD1% (2nd only if present)
+              3) CPU°C / GPU°C (GPU only if present)
+            -->
+            <StackPanel Orientation="Horizontal"
+                        VerticalAlignment="Center"
+                        Margin="0,0,6,0">
+                <!-- Stack 1: CPU + MEM -->
+                <Border x:Name="LoadStat"
+                        Padding="3,0"
+                        Margin="1,0"
+                        Background="Transparent"
+                        CornerRadius="3"
+                        Cursor="Arrow">
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                            <TextBlock Text="CPU" FontSize="8" Foreground="#6B6B6B" Width="22"
+                                       VerticalAlignment="Center" />
+                            <TextBlock x:Name="CpuText" Text="--%" FontSize="9" FontWeight="SemiBold"
+                                       Foreground="#333333" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                            <TextBlock Text="MEM" FontSize="8" Foreground="#6B6B6B" Width="22"
+                                       VerticalAlignment="Center" />
+                            <TextBlock x:Name="MemText" Text="--%" FontSize="9" FontWeight="SemiBold"
+                                       Foreground="#333333" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Stack 2: up to 2 fixed disks -->
+                <Border x:Name="DiskStat"
+                        Padding="3,0"
+                        Margin="1,0"
+                        Background="Transparent"
+                        CornerRadius="3"
+                        Cursor="Arrow">
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                        <StackPanel x:Name="Disk0Row" Orientation="Horizontal" HorizontalAlignment="Left">
+                            <TextBlock x:Name="Disk0Label" Text="—" FontSize="8" Foreground="#6B6B6B" Width="16"
+                                       VerticalAlignment="Center" />
+                            <TextBlock x:Name="Disk0Text" Text="--%" FontSize="9" FontWeight="SemiBold"
+                                       Foreground="#333333" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel x:Name="Disk1Row" Orientation="Horizontal" HorizontalAlignment="Left"
+                                    Visibility="Collapsed">
+                            <TextBlock x:Name="Disk1Label" Text="—" FontSize="8" Foreground="#6B6B6B" Width="16"
+                                       VerticalAlignment="Center" />
+                            <TextBlock x:Name="Disk1Text" Text="--%" FontSize="9" FontWeight="SemiBold"
+                                       Foreground="#333333" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Stack 3: temperatures -->
+                <Border x:Name="TempStat"
+                        Padding="3,0"
+                        Margin="1,0"
+                        Background="Transparent"
+                        CornerRadius="3"
+                        Cursor="Arrow">
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                            <TextBlock Text="CPU" FontSize="8" Foreground="#6B6B6B" Width="22"
+                                       VerticalAlignment="Center" />
+                            <TextBlock x:Name="CpuTempText" Text="--°" FontSize="9" FontWeight="SemiBold"
+                                       Foreground="#333333" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <StackPanel x:Name="GpuTempRow" Orientation="Horizontal" HorizontalAlignment="Left"
+                                    Visibility="Collapsed">
+                            <TextBlock Text="GPU" FontSize="8" Foreground="#6B6B6B" Width="22"
+                                       VerticalAlignment="Center" />
+                            <TextBlock x:Name="GpuTempText" Text="--°" FontSize="9" FontWeight="SemiBold"
+                                       Foreground="#333333" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!--
+              Taskbar auto-hide:
+              OFF (visible)  → bottom line + down arrow (will hide)
+              ON  (hidden)   → bottom line + up arrow rising from the line
+            -->
             <ToggleButton x:Name="TaskbarAutoHideToggle"
                           VerticalAlignment="Center"
                           Margin="2,0"
@@ -44,25 +130,45 @@
                                 BorderBrush="Transparent"
                                 BorderThickness="1">
                             <Grid Width="28" Height="28">
+                                <!-- Bottom taskbar line (centered; arrow sits on its midpoint) -->
                                 <Border x:Name="BarStrip"
                                         Width="16"
-                                        Height="3"
+                                        Height="2.5"
                                         CornerRadius="1"
                                         Background="#6B6B6B"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Bottom"
                                         Margin="0,0,0,5" />
-                                <Path x:Name="HideChevron"
-                                      Data="M 9,14 L 14,10 L 19,14"
+                                <!--
+                                  Down: vertical stem into chevron, centered on the bar (x=14).
+                                  Up: same, inverted — stem rises from the line.
+                                  Canvas is 28×28 so path coords match the control.
+                                -->
+                                <Path x:Name="ArrowDown"
+                                      Data="M 14,7 L 14,14 M 10,11 L 14,16 L 18,11"
                                       Stroke="#6B6B6B"
                                       StrokeThickness="1.75"
                                       StrokeStartLineCap="Round"
                                       StrokeEndLineCap="Round"
                                       StrokeLineJoin="Round"
+                                      Stretch="None"
+                                      HorizontalAlignment="Left"
+                                      VerticalAlignment="Top"
+                                      Width="28"
+                                      Height="28" />
+                                <Path x:Name="ArrowUp"
+                                      Data="M 14,16 L 14,9 M 10,12 L 14,7 L 18,12"
+                                      Stroke="#6B6B6B"
+                                      StrokeThickness="1.75"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Stretch="None"
                                       Visibility="Collapsed"
-                                      HorizontalAlignment="Center"
-                                      VerticalAlignment="Center"
-                                      Margin="0,0,0,4" />
+                                      HorizontalAlignment="Left"
+                                      VerticalAlignment="Top"
+                                      Width="28"
+                                      Height="28" />
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -73,31 +179,138 @@
                                 <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#D0E8FF" />
-                                <Setter TargetName="Root" Property="BorderBrush" Value="#6BA3D6" />
-                                <Setter TargetName="BarStrip" Property="Background" Value="#2F7FD1" />
-                                <Setter TargetName="HideChevron" Property="Stroke" Value="#2F7FD1" />
-                                <Setter TargetName="HideChevron" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="ArrowDown" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="ArrowUp" Property="Visibility" Value="Visible" />
                             </Trigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsChecked" Value="True" />
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="Root" Property="Background" Value="#BFDFFF" />
-                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </ToggleButton.Template>
             </ToggleButton>
 
-            <!-- Windows Start (modern 4-square logo) -->
+            <!-- Hamburger menu: Close, About, Install/Uninstall, version -->
+            <Button x:Name="MenuButton"
+                    VerticalAlignment="Center"
+                    Margin="2,0"
+                    Width="28"
+                    Height="28"
+                    Cursor="Hand"
+                    Click="MenuButton_Click"
+                    ToolTip="Menu"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Padding="0">
+                <Button.ContextMenu>
+                    <ContextMenu x:Name="AppMenu"
+                                 Opened="AppMenu_Opened">
+                        <MenuItem x:Name="MenuClose"
+                                  Header="Close"
+                                  Click="MenuClose_Click" />
+                        <MenuItem x:Name="MenuAbout"
+                                  Header="About"
+                                  Click="MenuAbout_Click" />
+                        <Separator />
+                        <MenuItem x:Name="MenuInstall"
+                                  Header="Install"
+                                  Click="MenuInstall_Click"
+                                  ToolTip="Install for this user and start with Windows login" />
+                        <MenuItem x:Name="MenuUninstall"
+                                  Header="Uninstall"
+                                  Click="MenuUninstall_Click"
+                                  ToolTip="Remove auto-start and installed files" />
+                        <Separator x:Name="MenuVersionSeparator" />
+                        <MenuItem x:Name="MenuVersion"
+                                  Header="1.0.0"
+                                  IsEnabled="False" />
+                        <MenuItem x:Name="MenuAppName"
+                                  Header="Switched Bar"
+                                  IsEnabled="False" />
+                    </ContextMenu>
+                </Button.ContextMenu>
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root"
+                                Background="Transparent"
+                                CornerRadius="4"
+                                Width="28"
+                                Height="28">
+                            <!-- Hamburger: three grey lines -->
+                            <Canvas Width="16" Height="12"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center">
+                                <Rectangle Canvas.Left="0" Canvas.Top="0"
+                                           Width="16" Height="2" RadiusX="1" RadiusY="1"
+                                           Fill="#6B6B6B" />
+                                <Rectangle Canvas.Left="0" Canvas.Top="5"
+                                           Width="16" Height="2" RadiusX="1" RadiusY="1"
+                                           Fill="#6B6B6B" />
+                                <Rectangle Canvas.Left="0" Canvas.Top="10"
+                                           Width="16" Height="2" RadiusX="1" RadiusY="1"
+                                           Fill="#6B6B6B" />
+                            </Canvas>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#E0E0E0" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
+            <!-- File Explorer (left of Windows icon) -->
+            <Button x:Name="ExplorerButton"
+                    VerticalAlignment="Center"
+                    Margin="2,0"
+                    Width="28"
+                    Height="28"
+                    Cursor="Hand"
+                    Click="ExplorerButton_Click"
+                    ToolTip="File Explorer"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Padding="0">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root"
+                                Background="Transparent"
+                                CornerRadius="4"
+                                Width="28"
+                                Height="28">
+                            <!-- Grey folder icon -->
+                            <Canvas Width="18" Height="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center">
+                                <!-- Tab -->
+                                <Path Data="M 0,3 L 0,1.5 Q 0,0.5 1,0.5 L 6,0.5 L 8,3 Z"
+                                      Fill="#6B6B6B" />
+                                <!-- Body -->
+                                <Path Data="M 0,3 L 18,3 L 18,13 Q 18,14 17,14 L 1,14 Q 0,14 0,13 Z"
+                                      Fill="#6B6B6B" />
+                            </Canvas>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#E0E0E0" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
+            <!-- Windows Start: modern 4-square logo in grey (matches close) -->
             <Button x:Name="StartButton"
                     VerticalAlignment="Center"
                     Margin="2,0"
                     Width="28"
                     Height="28"
                     Cursor="Hand"
+                    PreviewMouseLeftButtonDown="StartButton_PreviewMouseLeftButtonDown"
                     Click="StartButton_Click"
                     ToolTip="Start"
                     Background="Transparent"
@@ -110,22 +323,21 @@
                                 CornerRadius="4"
                                 Width="28"
                                 Height="28">
-                            <!-- Modern Windows logo: 2×2 squares with gap -->
                             <Canvas Width="16" Height="16"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center">
                                 <Rectangle Canvas.Left="0" Canvas.Top="0"
                                            Width="7" Height="7" RadiusX="0.5" RadiusY="0.5"
-                                           Fill="#F25022" />
+                                           Fill="#6B6B6B" />
                                 <Rectangle Canvas.Left="9" Canvas.Top="0"
                                            Width="7" Height="7" RadiusX="0.5" RadiusY="0.5"
-                                           Fill="#7FBA00" />
+                                           Fill="#6B6B6B" />
                                 <Rectangle Canvas.Left="0" Canvas.Top="9"
                                            Width="7" Height="7" RadiusX="0.5" RadiusY="0.5"
-                                           Fill="#00A4EF" />
+                                           Fill="#6B6B6B" />
                                 <Rectangle Canvas.Left="9" Canvas.Top="9"
                                            Width="7" Height="7" RadiusX="0.5" RadiusY="0.5"
-                                           Fill="#FFB900" />
+                                           Fill="#6B6B6B" />
                             </Canvas>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -170,48 +382,6 @@
                                LineStackingStrategy="BlockLineHeight" />
                 </StackPanel>
             </Border>
-
-            <!-- Close -->
-            <Button x:Name="CloseButton"
-                    VerticalAlignment="Center"
-                    Margin="2,0,2,0"
-                    Width="28"
-                    Height="28"
-                    Cursor="Hand"
-                    Click="CloseButton_Click"
-                    ToolTip="Close Swiztch Bar"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Padding="0">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Root"
-                                Background="Transparent"
-                                CornerRadius="4"
-                                Width="28"
-                                Height="28">
-                            <Path Data="M 7,7 L 21,21 M 21,7 L 7,21"
-                                  Stroke="#6B6B6B"
-                                  StrokeThickness="2.25"
-                                  StrokeStartLineCap="Round"
-                                  StrokeEndLineCap="Round"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Width="28"
-                                  Height="28"
-                                  Stretch="None" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#E0E0E0" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Root" Property="Background" Value="#D0D0D0" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Button.Template>
-            </Button>
         </StackPanel>
 
         <!-- Tabs: drag to reorder; order is kept across refresh. Click opens window. -->
@@ -235,12 +405,10 @@
                             Margin="2"
                             Cursor="Arrow"
                             ToolTip="{Binding Title}"
-                            BorderBrush="#C8C8C8"
-                            BorderThickness="1"
-                            Background="#E8E8E8"
                             CornerRadius="4"
                             Padding="4,2"
                             AllowDrop="True"
+                            MouseEnter="Tab_MouseEnter"
                             PreviewMouseLeftButtonDown="Tab_PreviewMouseLeftButtonDown"
                             PreviewMouseMove="Tab_PreviewMouseMove"
                             PreviewMouseLeftButtonUp="Tab_PreviewMouseLeftButtonUp"
@@ -248,6 +416,33 @@
                             Drop="Tab_Drop"
                             DragEnter="Tab_DragEnter"
                             DragLeave="Tab_DragLeave">
+                        <!--
+                          Layers (later triggers win):
+                          1) Default light grey
+                          2) Active = always a quieter darker grey
+                          3) Hover/drag blue sits on top of either grey
+                        -->
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#E8E8E8" />
+                                <Setter Property="BorderBrush" Value="#C8C8C8" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Style.Triggers>
+                                    <!-- Active base: grey only (never blue) -->
+                                    <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                        <Setter Property="Background" Value="#D4D4D4" />
+                                        <Setter Property="BorderBrush" Value="#8E8E8E" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
+                                    <!-- Hover always paints blue on top of default OR active grey -->
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#D0E8FF" />
+                                        <Setter Property="BorderBrush" Value="#6BA3D6" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -266,10 +461,22 @@
                                        Text="{Binding Title}"
                                        VerticalAlignment="Center"
                                        FontSize="11"
-                                       Foreground="#333333"
                                        TextTrimming="CharacterEllipsis"
                                        TextWrapping="NoWrap"
-                                       IsHitTestVisible="False" />
+                                       IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#444444" />
+                                        <Setter Property="FontWeight" Value="Normal" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                <Setter Property="Foreground" Value="#222222" />
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </Grid>
                     </Border>
                 </DataTemplate>

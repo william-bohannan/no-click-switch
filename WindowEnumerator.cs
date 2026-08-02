@@ -1,10 +1,10 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 
-namespace SwiztchBar;
+namespace SwitchedBar;
 
 /// <summary>
 /// Enumerates visible top-level windows suitable for task-switcher style tabs

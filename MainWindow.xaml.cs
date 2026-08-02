@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -6,7 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 
-namespace SwiztchBar;
+namespace SwitchedBar;
 
 /// <summary>
 /// Always-on-top top bar: one tab per open window.
@@ -22,12 +22,15 @@ public partial class MainWindow : Window
     private const double TabHeightEm = 2.0; // 32 DIP
     private const double DragThreshold = 6.0;
 
-    private static readonly DataFormat TabDragFormat = DataFormats.GetDataFormat("SwiztchBar.WindowEntry.Handle");
+    private static readonly DataFormat TabDragFormat = DataFormats.GetDataFormat("SwitchedBar.WindowEntry.Handle");
 
     private readonly ObservableCollection<WindowEntry> _tabs = new();
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _clockTimer;
+    private readonly DispatcherTimer _activeTabTimer;
+    private readonly SystemStatsReader _stats = new();
     private IntPtr _selfHwnd;
+    private IntPtr _lastAppForeground;
     private bool _syncingAutoHideToggle;
 
     // Drag state
@@ -51,6 +54,15 @@ public partial class MainWindow : Window
         DpiChanged += (_, _) => PositionAsTopBar();
         SizeChanged += (_, _) => EnsureFullWidth();
 
+        // When the mouse enters the bar, claim foreground rights so tab hover can
+        // activate real app windows without a prior click (and without taskbar peek).
+        MouseEnter += (_, _) => EnsureBarForeground();
+        PreviewMouseMove += (_, _) =>
+        {
+            if (!IsActive)
+                EnsureBarForeground();
+        };
+
         _refreshTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(1.5),
@@ -65,7 +77,18 @@ public partial class MainWindow : Window
         {
             Interval = TimeSpan.FromSeconds(1),
         };
-        _clockTimer.Tick += (_, _) => UpdateClock();
+        _clockTimer.Tick += (_, _) =>
+        {
+            UpdateClock();
+            UpdateSystemStats();
+        };
+
+        // Track foreground window often enough that the active tab feels live.
+        _activeTabTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(250),
+        };
+        _activeTabTimer.Tick += (_, _) => UpdateActiveTab();
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -73,19 +96,35 @@ public partial class MainWindow : Window
         _selfHwnd = new WindowInteropHelper(this).Handle;
         PositionAsTopBar();
         RefreshTabs();
+
+        // On open: hide the Windows taskbar so this bar owns the edge.
+        try
+        {
+            TaskbarAutoHide.SetEnabled(true);
+        }
+        catch
+        {
+            // Best-effort; bar still works if shell API fails.
+        }
+
         SyncTaskbarAutoHideToggle();
         UpdateClock();
+        UpdateSystemStats();
+        UpdateActiveTab();
         // After first layout pass, re-assert full width (SizeToContent can shrink it).
         Dispatcher.BeginInvoke(PositionAsTopBar, DispatcherPriority.Loaded);
         _refreshTimer.Start();
         _clockTimer.Start();
+        _activeTabTimer.Start();
     }
 
     private void Window_Closed(object? sender, EventArgs e)
     {
         _refreshTimer.Stop();
         _clockTimer.Stop();
-        // Closing Swiztch Bar restores the Windows taskbar (turns auto-hide off).
+        _activeTabTimer.Stop();
+        _stats.Dispose();
+        // Closing Switched Bar restores the Windows taskbar (turns auto-hide off).
         try
         {
             TaskbarAutoHide.SetEnabled(false);
@@ -105,9 +144,135 @@ public partial class MainWindow : Window
         ClockBorder.ToolTip = now.ToString("F");
     }
 
+    private static readonly SolidColorBrush UsageNormalBrush = CreateFrozenBrush(0x33, 0x33, 0x33);
+    private static readonly SolidColorBrush UsageWarnBrush = CreateFrozenBrush(0xE6, 0x51, 0x00);
+    private static readonly SolidColorBrush UsageCriticalBrush = CreateFrozenBrush(0xC6, 0x28, 0x28);
+
+    private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    private void UpdateSystemStats()
+    {
+        _stats.Sample();
+
+        // Stack 1: CPU / MEM
+        CpuText.Text = $"{_stats.CpuPercent}%";
+        CpuText.Foreground = BrushForUsage(_stats.CpuPercent);
+        MemText.Text = $"{_stats.MemPercent}%";
+        MemText.Foreground = BrushForUsage(_stats.MemPercent);
+        LoadStat.ToolTip = $"{_stats.CpuToolTip}\n{_stats.MemToolTip}";
+
+        // Stack 2: up to two fixed disks
+        var d0 = _stats.Disk0;
+        var d1 = _stats.Disk1;
+
+        if (d0 is not null)
+        {
+            Disk0Row.Visibility = Visibility.Visible;
+            Disk0Label.Text = d0.Value.Letter.TrimEnd(':');
+            Disk0Text.Text = $"{d0.Value.UsedPercent}%";
+            Disk0Text.Foreground = BrushForUsage(d0.Value.UsedPercent);
+        }
+        else
+        {
+            Disk0Label.Text = "—";
+            Disk0Text.Text = "--%";
+            Disk0Text.Foreground = UsageNormalBrush;
+        }
+
+        if (d1 is not null)
+        {
+            Disk1Row.Visibility = Visibility.Visible;
+            Disk1Label.Text = d1.Value.Letter.TrimEnd(':');
+            Disk1Text.Text = $"{d1.Value.UsedPercent}%";
+            Disk1Text.Foreground = BrushForUsage(d1.Value.UsedPercent);
+            DiskStat.ToolTip = d0 is not null
+                ? $"{d0.Value.ToolTip}\n\n{d1.Value.ToolTip}"
+                : d1.Value.ToolTip;
+        }
+        else
+        {
+            Disk1Row.Visibility = Visibility.Collapsed;
+            DiskStat.ToolTip = d0 is not null ? d0.Value.ToolTip : "Disk";
+        }
+
+        // Stack 3: temps (GPU row only if present)
+        if (_stats.CpuTempC is int cpuT)
+        {
+            CpuTempText.Text = $"{cpuT}°";
+            CpuTempText.Foreground = BrushForTemp(cpuT);
+        }
+        else
+        {
+            CpuTempText.Text = "--°";
+            CpuTempText.Foreground = UsageNormalBrush;
+        }
+
+        if (_stats.GpuTempC is int gpuT)
+        {
+            GpuTempRow.Visibility = Visibility.Visible;
+            GpuTempText.Text = $"{gpuT}°";
+            GpuTempText.Foreground = BrushForTemp(gpuT);
+            TempStat.ToolTip = $"{_stats.CpuTempToolTip}\n{_stats.GpuTempToolTip}";
+        }
+        else
+        {
+            GpuTempRow.Visibility = Visibility.Collapsed;
+            TempStat.ToolTip = _stats.CpuTempToolTip;
+        }
+    }
+
+    private static Brush BrushForUsage(int percent)
+    {
+        if (percent >= 90)
+            return UsageCriticalBrush;
+        if (percent >= 75)
+            return UsageWarnBrush;
+        return UsageNormalBrush;
+    }
+
+    private static Brush BrushForTemp(int celsius)
+    {
+        if (celsius >= 90)
+            return UsageCriticalBrush;
+        if (celsius >= 75)
+            return UsageWarnBrush;
+        return UsageNormalBrush;
+    }
+
+    // Captured on mouse-down before our click dismisses an open Start menu.
+    private bool _startWasOpenOnMouseDown;
+
+    private void StartButton_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // Must read before focus moves to us (that can close Start immediately).
+        _startWasOpenOnMouseDown = StartMenuLauncher.IsOpen();
+    }
+
     private void StartButton_Click(object sender, RoutedEventArgs e)
     {
-        StartMenuLauncher.Open();
+        // Toggle: open if it was closed; close (and don't reopen) if it was open.
+        StartMenuLauncher.Toggle(_startWasOpenOnMouseDown);
+    }
+
+    private void ExplorerButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                UseShellExecute = true,
+            });
+        }
+        catch
+        {
+            // Best-effort; ignore if Explorer cannot start.
+        }
     }
 
     /// <summary>
@@ -167,14 +332,14 @@ public partial class MainWindow : Window
                 _tabs.RemoveAt(i);
         }
 
-        // Update title/icon when the window title changes (avoids thrashing icons every tick).
-        for (var i = 0; i < _tabs.Count; i++)
+        // Update title when it changes (keep same entry instance so IsActive bindings stick).
+        foreach (var tab in _tabs)
         {
-            if (!liveByHandle.TryGetValue(_tabs[i].Handle, out var fresh))
+            if (!liveByHandle.TryGetValue(tab.Handle, out var fresh))
                 continue;
 
-            if (_tabs[i].Title != fresh.Title)
-                _tabs[i] = fresh;
+            if (tab.Title != fresh.Title)
+                tab.Title = fresh.Title;
         }
 
         // Append newly opened windows at the end (in enumerator order).
@@ -185,8 +350,49 @@ public partial class MainWindow : Window
                 _tabs.Add(w);
         }
 
+        UpdateActiveTab();
         Dispatcher.BeginInvoke(EnsureFullWidth, DispatcherPriority.Loaded);
     }
+
+    /// <summary>
+    /// Marks the tab for the current foreground app. When our bar is focused,
+    /// keeps highlighting the last real app window.
+    /// </summary>
+    private void UpdateActiveTab()
+    {
+        var fg = ForegroundTracker.GetForegroundRootWindow();
+
+        // Ignore our own bar (and its popups) so hover/click on the bar
+        // doesn't clear the active app highlight.
+        if (fg != IntPtr.Zero && fg != _selfHwnd && !IsOwnedByUs(fg))
+            _lastAppForeground = fg;
+
+        var activeHwnd = _lastAppForeground;
+        foreach (var tab in _tabs)
+            tab.IsActive = ForegroundTracker.IsTabForForeground(tab.Handle, activeHwnd);
+    }
+
+    private bool IsOwnedByUs(IntPtr hWnd)
+    {
+        if (_selfHwnd == IntPtr.Zero || hWnd == IntPtr.Zero)
+            return false;
+        if (hWnd == _selfHwnd)
+            return true;
+
+        // Walk owner chain a few steps (GW_OWNER = 4).
+        var walk = hWnd;
+        for (var i = 0; i < 6 && walk != IntPtr.Zero; i++)
+        {
+            if (walk == _selfHwnd)
+                return true;
+            walk = GetWindow(walk, 4);
+        }
+
+        return false;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
     private void SyncTaskbarAutoHideToggle()
     {
@@ -216,6 +422,58 @@ public partial class MainWindow : Window
     }
 
     #region Drag and drop reordering
+
+    private void EnsureBarForeground()
+    {
+        if (_selfHwnd == IntPtr.Zero)
+            _selfHwnd = new WindowInteropHelper(this).Handle;
+
+        if (_selfHwnd == IntPtr.Zero)
+            return;
+
+        // Take foreground without requiring a click first.
+        WindowActivator.ForceOurWindowForeground(_selfHwnd);
+        if (!IsActive)
+            Activate();
+    }
+
+    private void Tab_MouseEnter(object sender, MouseEventArgs e)
+    {
+        // Hover preview: bring that window to the front (no resize). Skip while dragging.
+        if (_dragInProgress)
+            return;
+
+        if (sender is not FrameworkElement { Tag: WindowEntry entry })
+            return;
+
+        // 1) Claim foreground from whatever app is active (may be Explorer/shell).
+        EnsureBarForeground();
+
+        // 2) Hand foreground to the real app window (not a taskbar button flash).
+        WindowActivator.BringToFront(entry.Handle);
+        _lastAppForeground = entry.Handle;
+        UpdateActiveTab();
+
+        // 3) Shell sometimes peeks/shows the taskbar on failed activation; re-assert.
+        ReassertAutoHideIfNeeded();
+    }
+
+    private void ReassertAutoHideIfNeeded()
+    {
+        // Keep auto-hide on when the toggle says it should be (default after open).
+        if (TaskbarAutoHideToggle.IsChecked != true)
+            return;
+
+        try
+        {
+            if (!TaskbarAutoHide.IsEnabled)
+                TaskbarAutoHide.SetEnabled(true);
+        }
+        catch
+        {
+            // Best-effort.
+        }
+    }
 
     private void Tab_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -497,6 +755,7 @@ public partial class MainWindow : Window
 
         ClearDragHighlight();
         _dragHighlight = border;
+        // Local values for drag target; cleared so Style hover works again after.
         border.BorderBrush = new SolidColorBrush(Color.FromRgb(0x2F, 0x7F, 0xD1));
         border.BorderThickness = new Thickness(2);
         border.Background = new SolidColorBrush(Color.FromRgb(0xD0, 0xE8, 0xFF));
@@ -507,9 +766,10 @@ public partial class MainWindow : Window
         if (_dragHighlight is null)
             return;
 
-        _dragHighlight.BorderBrush = new SolidColorBrush(Color.FromRgb(0xC8, 0xC8, 0xC8));
-        _dragHighlight.BorderThickness = new Thickness(1);
-        _dragHighlight.Background = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8));
+        // Remove local values so Style (including hover) takes effect again.
+        _dragHighlight.ClearValue(Border.BackgroundProperty);
+        _dragHighlight.ClearValue(Border.BorderBrushProperty);
+        _dragHighlight.ClearValue(Border.BorderThicknessProperty);
         _dragHighlight = null;
     }
 
@@ -524,6 +784,8 @@ public partial class MainWindow : Window
             free.Y,
             free.Width,
             free.Height);
+        _lastAppForeground = entry.Handle;
+        UpdateActiveTab();
     }
 
     /// <summary>
@@ -563,8 +825,117 @@ public partial class MainWindow : Window
         return (x, y, Math.Max(1, w), Math.Max(1, h));
     }
 
-    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    private void MenuButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (MenuButton.ContextMenu is null)
+            return;
+
+        RefreshAppMenu();
+        MenuButton.ContextMenu.PlacementTarget = MenuButton;
+        MenuButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        MenuButton.ContextMenu.IsOpen = true;
+    }
+
+    private void AppMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        RefreshAppMenu();
+    }
+
+    private void RefreshAppMenu()
+    {
+        var installed = AppInstaller.IsInstalled;
+        MenuInstall.Visibility = installed ? Visibility.Collapsed : Visibility.Visible;
+        MenuUninstall.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
+        MenuVersion.Header = AppInstaller.VersionString;
+    }
+
+    private void MenuClose_Click(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void MenuAbout_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = AppInstaller.GitHubUrl,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not open the GitHub page.\n\n{ex.Message}",
+                "Switched Bar",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void MenuInstall_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            AppInstaller.Install();
+            MessageBox.Show(
+                "Installed for this user.\n\nSwitched Bar will start automatically when you sign in to Windows.",
+                "Switched Bar",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Install failed.\n\n{ex.Message}",
+                "Switched Bar",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private void MenuUninstall_Click(object sender, RoutedEventArgs e)
+    {
+        var result = MessageBox.Show(
+            "Uninstall Switched Bar for this user?\n\nThis removes auto-start and installed files.",
+            "Switched Bar",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        try
+        {
+            var runningFromInstall = AppInstaller.IsRunningFromInstallLocation();
+            AppInstaller.Uninstall();
+
+            if (runningFromInstall)
+            {
+                MessageBox.Show(
+                    "Uninstall started. Switched Bar will close now.",
+                    "Switched Bar",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                Close();
+            }
+            else
+            {
+                MessageBox.Show(
+                    "Uninstalled. Auto-start and installed files have been removed.",
+                    "Switched Bar",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Uninstall failed.\n\n{ex.Message}",
+                "Switched Bar",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 }
