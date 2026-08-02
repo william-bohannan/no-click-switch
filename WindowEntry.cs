@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media.Imaging;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 /// <summary>One open top-level window shown as a single tab.</summary>
 public sealed class WindowEntry : INotifyPropertyChanged

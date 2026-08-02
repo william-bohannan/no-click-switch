@@ -2,7 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using LibreHardwareMonitor.Hardware;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 /// <summary>
 /// Samples CPU/MEM load, up to two fixed disks, and CPU/GPU temperatures.

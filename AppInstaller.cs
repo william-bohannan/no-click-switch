@@ -3,17 +3,26 @@ using System.IO;
 using System.Reflection;
 using Microsoft.Win32;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 /// <summary>
-/// Installs Switched Bar for the current user with auto-start on login
+/// Installs No Click Switch for the current user with auto-start on login
 /// (HKCU Run key + files under LocalAppData). Not a Windows Service —
 /// UI apps must run in the user session.
 /// </summary>
 internal static class AppInstaller
 {
-    public const string AppName = "SwitchedBar";
-    public const string GitHubUrl = "https://github.com/william-bohannan/switchedbar";
+    /// <summary>Executable / install folder / Run-key name (no spaces).</summary>
+    public const string AppName = "NoClickSwitch";
+
+    /// <summary>Short product name.</summary>
+    public const string ShortName = "NCS";
+
+    /// <summary>Full product display name.</summary>
+    public const string DisplayName = "No Click Switch";
+
+    public const string GitHubUrl = "https://github.com/william-bohannan/no-click-switch";
+    public const string WebsiteUrl = "https://noclickswitch.com";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
     public static string InstallDirectory { get; } =

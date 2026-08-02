@@ -4,7 +4,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 /// <summary>
 /// Enumerates visible top-level windows suitable for task-switcher style tabs

@@ -1,7 +1,7 @@
-<Window x:Class="SwitchedBar.MainWindow"
+<Window x:Class="NoClickSwitch.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Switched Bar"
+        Title="No Click Switch (NCS)"
         WindowStyle="None"
         ResizeMode="NoResize"
         SizeToContent="Height"
@@ -54,7 +54,7 @@
                                   Header="1.0.0"
                                   IsEnabled="False" />
                         <MenuItem x:Name="MenuAppName"
-                                  Header="Switched Bar"
+                                  Header="No Click Switch (NCS)"
                                   IsEnabled="False" />
                     </ContextMenu>
                 </Button.ContextMenu>

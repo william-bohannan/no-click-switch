@@ -6,17 +6,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <RootNamespace>SwitchedBar</RootNamespace>
-    <AssemblyName>SwitchedBar</AssemblyName>
+    <RootNamespace>NoClickSwitch</RootNamespace>
+    <AssemblyName>NoClickSwitch</AssemblyName>
     <Version>1.0.0</Version>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <InformationalVersion>1.0.0</InformationalVersion>
-    <Product>Switched Bar</Product>
+    <Product>No Click Switch</Product>
     <Company>william-bohannan</Company>
-    <Description>Always-on-top Windows top bar window switcher</Description>
-    <ApplicationIcon>Assets\SwitchedBar.ico</ApplicationIcon>
-    <ApplicationTitle>Switched Bar</ApplicationTitle>
+    <Authors>william-bohannan</Authors>
+    <Description>No Click Switch (NCS) — always-on-top Windows top bar window switcher</Description>
+    <ApplicationIcon>Assets\NoClickSwitch.ico</ApplicationIcon>
+    <ApplicationTitle>No Click Switch</ApplicationTitle>
+    <AssemblyTitle>No Click Switch (NCS)</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,7 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Assets\SwitchedBar.ico" />
+    <Resource Include="Assets\NoClickSwitch.ico" />
   </ItemGroup>
 
 </Project>

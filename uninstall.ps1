@@ -1,20 +1,24 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Uninstall Switched Bar for the current user.
+  Uninstall No Click Switch (NCS) for the current user.
 
 .EXAMPLE
-  irm https://raw.githubusercontent.com/william-bohannan/switchedbar/main/uninstall.ps1 | iex
+  irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/uninstall.ps1 | iex
 #>
 $ErrorActionPreference = "Stop"
 
-$Repo = "william-bohannan/switchedbar"
-$AppName = "SwitchedBar"
+$Repo = "william-bohannan/no-click-switch"
+$AppName = "NoClickSwitch"
+$ShortName = "NCS"
+$DisplayName = "No Click Switch"
 $InstallDir = Join-Path $env:LOCALAPPDATA $AppName
 $RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$LegacyAppName = "SwitchedBar"
+$LegacyInstallDir = Join-Path $env:LOCALAPPDATA $LegacyAppName
 
 Write-Host ""
-Write-Host "  Switched Bar uninstaller" -ForegroundColor White
+Write-Host "  $DisplayName ($ShortName) uninstaller" -ForegroundColor White
 Write-Host "  https://github.com/$Repo" -ForegroundColor DarkGray
 Write-Host ""
 
@@ -51,6 +55,22 @@ if (Test-Path -LiteralPath $InstallDir) {
 }
 else {
     Write-Host "=> Install folder not found (already removed)" -ForegroundColor DarkGray
+}
+
+# Also clean a legacy Switched Bar install if present.
+Get-Process -Name $LegacyAppName -ErrorAction SilentlyContinue | ForEach-Object {
+    Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+}
+try {
+    if (Get-ItemProperty -Path $RunKeyPath -Name $LegacyAppName -ErrorAction SilentlyContinue) {
+        Remove-ItemProperty -Path $RunKeyPath -Name $LegacyAppName -ErrorAction SilentlyContinue
+        Write-Host "=> Removed legacy Switched Bar auto-start" -ForegroundColor Cyan
+    }
+}
+catch { }
+if (Test-Path -LiteralPath $LegacyInstallDir) {
+    Write-Host "=> Removing legacy $LegacyInstallDir" -ForegroundColor Cyan
+    Remove-Item -LiteralPath $LegacyInstallDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ""

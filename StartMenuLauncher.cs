@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 /// <summary>
 /// Opens / closes / toggles the Windows Start menu.

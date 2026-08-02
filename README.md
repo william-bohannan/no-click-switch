@@ -1,23 +1,30 @@
-# Switched Bar
+# No Click Switch (NCS)
 
 A minimal always-on-top Windows top bar that shows **one tab per open window**.
 
-**Repository:** https://github.com/william-bohannan/switchedbar
+| | |
+|---|---|
+| **Short name** | **NCS** |
+| **Repository** | https://github.com/william-bohannan/no-click-switch |
+| **Website** | https://noclickswitch.com *(coming soon)* |
+| **Install path** | `%LocalAppData%\NoClickSwitch` |
+
+> Formerly **Switched Bar** (`william-bohannan/switchedbar`). The install script removes any legacy Switched Bar install when you install NCS.
 
 ## Install (Windows)
 
-No admin rights. Installs to `%LocalAppData%\SwitchedBar`, starts with Windows (current user), and launches the app.
+No admin rights. Installs to `%LocalAppData%\NoClickSwitch`, starts with Windows (current user), and launches the app.
 
 **PowerShell** (recommended):
 
 ```powershell
-irm https://raw.githubusercontent.com/william-bohannan/switchedbar/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex
 ```
 
 **Command Prompt:**
 
 ```cmd
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william-bohannan/switchedbar/main/install.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex"
 ```
 
 The script downloads the latest **self-contained** release (no .NET install required). If no release is available, it falls back to building from source when the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) is present.
@@ -25,7 +32,7 @@ The script downloads the latest **self-contained** release (no .NET install requ
 ### Uninstall
 
 ```powershell
-irm https://raw.githubusercontent.com/william-bohannan/switchedbar/main/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/uninstall.ps1 | iex
 ```
 
 You can also use **Uninstall** from the app’s ☰ menu.
@@ -35,7 +42,7 @@ You can also use **Uninstall** from the app’s ☰ menu.
 - Full-width bar pinned to the **top of the primary screen**
 - **Always on top**
 - **One tab per open window** (title + icon)
-- **Hover** a tab to bring that window to the front (blue highlight)
+- **Hover** a tab to bring that window to the front (blue highlight) — switch without a click
 - **Click** a tab to focus and fill the free space below the bar
 - **Right-click** a tab → **Close window**
 - **Active window** tab uses a quiet grey highlight
@@ -46,8 +53,8 @@ You can also use **Uninstall** from the app’s ☰ menu.
 - Right: compact stats (**CPU/MEM %**, **up to 2 disks %**, **CPU/GPU °C**), **auto-hide**, **clock**
 - Disks: first two fixed drives (system drive preferred); 2nd row only if present
 - Temps via LibreHardwareMonitor (GPU row only if a sensor is found)
-- **Menu**: Close, About (GitHub), Install / Uninstall, version, **Switched Bar**
-- **Install** (in-app): copies the app to `%LocalAppData%\SwitchedBar` and adds **auto-start on login** (current user)
+- **Menu**: Close, About (GitHub), Install / Uninstall, version, **No Click Switch (NCS)**
+- **Install** (in-app): copies the app to `%LocalAppData%\NoClickSwitch` and adds **auto-start on login** (current user)
 - **Uninstall**: removes auto-start and installed files (shown only when installed)
 - Explorer icon opens **File Explorer**
 - Windows logo opens the **Start** menu
@@ -66,21 +73,35 @@ You can also use **Uninstall** from the app’s ☰ menu.
 ## Run (development)
 
 ```powershell
-dotnet run
+dotnet run --project NoClickSwitch.csproj
 ```
 
 ## Build
 
 ```powershell
-dotnet build -c Release
+dotnet build NoClickSwitch.csproj -c Release
 ```
 
 Self-contained package (same layout as GitHub Releases):
 
 ```powershell
-dotnet publish SwitchedBar.csproj -c Release -r win-x64 --self-contained true `
+dotnet publish NoClickSwitch.csproj -c Release -r win-x64 --self-contained true `
   -p:PublishSingleFile=true `
   -p:IncludeNativeLibrariesForSelfExtract=true `
   -p:EnableCompressionInSingleFile=true `
   -o publish
+```
+
+## Brand assets
+
+App icon and GitHub social preview live under `Assets/`:
+
+- `Assets/NoClickSwitch.ico` — multi-size app icon (NCS monogram)
+- `Assets/app-icon-256.png` / `app-icon-512.png` — PNG sources
+- `Assets/git-repo-social.png` — repo social card (`No Click Switch` · NCS · noclickswitch.com)
+
+Regenerate with:
+
+```powershell
+python Assets/generate_brand.py
 ```

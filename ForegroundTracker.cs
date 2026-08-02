@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 /// <summary>Resolves the current foreground top-level window for tab highlighting.</summary>
 internal static class ForegroundTracker

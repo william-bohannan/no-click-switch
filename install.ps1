@@ -1,27 +1,28 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Install Switched Bar for the current user (no admin).
+  Install No Click Switch (NCS) for the current user (no admin).
 
 .DESCRIPTION
   Downloads the latest release (or builds from source), installs to
-  %LocalAppData%\SwitchedBar, registers auto-start on login, and launches the app.
+  %LocalAppData%\NoClickSwitch, registers auto-start on login, and launches the app.
+  Also removes a previous Switched Bar install if present.
 
 .EXAMPLE
   # One-liner from the web (recommended)
-  irm https://raw.githubusercontent.com/william-bohannan/switchedbar/main/install.ps1 | iex
+  irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex
 
 .EXAMPLE
   # From Command Prompt
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william-bohannan/switchedbar/main/install.ps1 | iex"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex"
 
 .EXAMPLE
   # Install a specific release tag
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/william-bohannan/switchedbar/main/install.ps1))) -Version v1.0.0
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1))) -Version v1.0.0
 
 .EXAMPLE
   # Install without launching
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/william-bohannan/switchedbar/main/install.ps1))) -NoStart
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1))) -NoStart
 #>
 param(
     [string]$Version = "latest",
@@ -32,12 +33,16 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$Repo = "william-bohannan/switchedbar"
-$AppName = "SwitchedBar"
+$Repo = "william-bohannan/no-click-switch"
+$AppName = "NoClickSwitch"
+$ShortName = "NCS"
+$DisplayName = "No Click Switch"
 $InstallDir = Join-Path $env:LOCALAPPDATA $AppName
 $ExePath = Join-Path $InstallDir "$AppName.exe"
 $RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$UserAgent = "SwitchedBar-Installer"
+$UserAgent = "NoClickSwitch-Installer"
+$LegacyAppName = "SwitchedBar"
+$LegacyInstallDir = Join-Path $env:LOCALAPPDATA $LegacyAppName
 
 function Write-Step([string]$Message) {
     Write-Host ""
@@ -74,7 +79,7 @@ function Get-ReleaseAsset {
 
     $release = Invoke-RestMethod -Uri $uri -Headers $headers
     $asset = $release.assets |
-        Where-Object { $_.name -match '(?i)win-x64.*\.zip$|SwitchedBar.*\.zip$' } |
+        Where-Object { $_.name -match '(?i)win-x64.*\.zip$|NoClickSwitch.*\.zip$' } |
         Select-Object -First 1
     if (-not $asset) {
         $asset = $release.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
@@ -99,7 +104,7 @@ function Install-FromZip {
     }
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 
-    $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ("SwitchedBar-extract-" + [guid]::NewGuid().ToString("N"))
+    $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ("NoClickSwitch-extract-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
     try {
         Expand-Archive -LiteralPath $ZipPath -DestinationPath $extractDir -Force
@@ -134,9 +139,9 @@ Options:
 "@
     }
 
-    $srcZip = Join-Path ([System.IO.Path]::GetTempPath()) "SwitchedBar-src.zip"
-    $srcDir = Join-Path ([System.IO.Path]::GetTempPath()) ("SwitchedBar-src-" + [guid]::NewGuid().ToString("N"))
-    $publishDir = Join-Path ([System.IO.Path]::GetTempPath()) ("SwitchedBar-pub-" + [guid]::NewGuid().ToString("N"))
+    $srcZip = Join-Path ([System.IO.Path]::GetTempPath()) "NoClickSwitch-src.zip"
+    $srcDir = Join-Path ([System.IO.Path]::GetTempPath()) ("NoClickSwitch-src-" + [guid]::NewGuid().ToString("N"))
+    $publishDir = Join-Path ([System.IO.Path]::GetTempPath()) ("NoClickSwitch-pub-" + [guid]::NewGuid().ToString("N"))
 
     Write-Info "Downloading source from main..."
     Invoke-WebRequest -Uri "https://github.com/$Repo/archive/refs/heads/main.zip" -OutFile $srcZip -UseBasicParsing -Headers @{ "User-Agent" = $UserAgent }
@@ -146,9 +151,9 @@ Options:
     $projectRoot = Get-ChildItem -LiteralPath $srcDir -Directory | Select-Object -First 1
     if (-not $projectRoot) { throw "Could not locate source folder after download." }
 
-    $csproj = Join-Path $projectRoot.FullName "SwitchedBar.csproj"
+    $csproj = Join-Path $projectRoot.FullName "NoClickSwitch.csproj"
     if (-not (Test-Path -LiteralPath $csproj)) {
-        throw "SwitchedBar.csproj not found in source archive."
+        throw "NoClickSwitch.csproj not found in source archive."
     }
 
     Write-Info "Publishing self-contained win-x64 build (this may take a minute)..."
@@ -185,12 +190,33 @@ function Set-AutoStart {
     Write-Ok "Auto-start on login enabled (current user)"
 }
 
+function Remove-LegacyInstall {
+    # Migrated from Switched Bar — clean old Run key + install folder if present.
+    Get-Process -Name $LegacyAppName -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Info "Stopping legacy $($_.ProcessName) (PID $($_.Id))..."
+        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+    }
+    try {
+        if (Get-ItemProperty -Path $RunKeyPath -Name $LegacyAppName -ErrorAction SilentlyContinue) {
+            Remove-ItemProperty -Path $RunKeyPath -Name $LegacyAppName -ErrorAction SilentlyContinue
+            Write-Info "Removed legacy Switched Bar auto-start"
+        }
+    }
+    catch { }
+    if (Test-Path -LiteralPath $LegacyInstallDir) {
+        Write-Info "Removing legacy install at $LegacyInstallDir"
+        Remove-Item -LiteralPath $LegacyInstallDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # --- main ---
 Write-Host ""
-Write-Host "  Switched Bar installer" -ForegroundColor White
+Write-Host "  $DisplayName ($ShortName) installer" -ForegroundColor White
 Write-Host "  https://github.com/$Repo" -ForegroundColor DarkGray
+Write-Host "  https://noclickswitch.com" -ForegroundColor DarkGray
 
 Stop-AppProcesses
+Remove-LegacyInstall
 
 $installedFrom = $null
 if (-not $ForceBuild) {
@@ -200,7 +226,7 @@ if (-not $ForceBuild) {
         Write-Ok "Found $($asset.Tag) — $($asset.Name)"
 
         Write-Step "Downloading..."
-        $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) "SwitchedBar-install.zip"
+        $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) "NoClickSwitch-install.zip"
         Invoke-WebRequest -Uri $asset.DownloadUrl -OutFile $zipPath -UseBasicParsing -Headers @{ "User-Agent" = $UserAgent }
 
         Write-Step "Installing to $InstallDir"
@@ -225,7 +251,7 @@ Write-Step "Configuring auto-start..."
 Set-AutoStart
 
 if (-not $NoStart) {
-    Write-Step "Starting Switched Bar..."
+    Write-Step "Starting $DisplayName ($ShortName)..."
     Start-Process -FilePath $ExePath
     Write-Ok "Launched"
 }

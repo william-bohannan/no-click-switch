@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 /// <summary>
 /// Reads / writes Windows taskbar auto-hide via the shell app-bar API.

@@ -6,7 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 /// <summary>
 /// Always-on-top top bar: one tab per open window.
@@ -22,7 +22,7 @@ public partial class MainWindow : Window
     private const double TabHeightEm = 2.0; // 32 DIP
     private const double DragThreshold = 6.0;
 
-    private static readonly DataFormat TabDragFormat = DataFormats.GetDataFormat("SwitchedBar.WindowEntry.Handle");
+    private static readonly DataFormat TabDragFormat = DataFormats.GetDataFormat("NoClickSwitch.WindowEntry.Handle");
 
     private readonly ObservableCollection<WindowEntry> _tabs = new();
     private readonly DispatcherTimer _refreshTimer;
@@ -124,7 +124,7 @@ public partial class MainWindow : Window
         _clockTimer.Stop();
         _activeTabTimer.Stop();
         _stats.Dispose();
-        // Closing Switched Bar restores the Windows taskbar (turns auto-hide off).
+        // Closing No Click Switch restores the Windows taskbar (turns auto-hide off).
         try
         {
             TaskbarAutoHide.SetEnabled(false);
@@ -940,7 +940,7 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(
                 $"Could not open the GitHub page.\n\n{ex.Message}",
-                "Switched Bar",
+                AppInstaller.DisplayName,
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
@@ -952,8 +952,8 @@ public partial class MainWindow : Window
         {
             AppInstaller.Install();
             MessageBox.Show(
-                "Installed for this user.\n\nSwitched Bar will start automatically when you sign in to Windows.",
-                "Switched Bar",
+                $"Installed for this user.\n\n{AppInstaller.DisplayName} ({AppInstaller.ShortName}) will start automatically when you sign in to Windows.",
+                AppInstaller.DisplayName,
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
         }
@@ -961,7 +961,7 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(
                 $"Install failed.\n\n{ex.Message}",
-                "Switched Bar",
+                AppInstaller.DisplayName,
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -970,8 +970,8 @@ public partial class MainWindow : Window
     private void MenuUninstall_Click(object sender, RoutedEventArgs e)
     {
         var result = MessageBox.Show(
-            "Uninstall Switched Bar for this user?\n\nThis removes auto-start and installed files.",
-            "Switched Bar",
+            $"Uninstall {AppInstaller.DisplayName} ({AppInstaller.ShortName}) for this user?\n\nThis removes auto-start and installed files.",
+            AppInstaller.DisplayName,
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
 
@@ -986,8 +986,8 @@ public partial class MainWindow : Window
             if (runningFromInstall)
             {
                 MessageBox.Show(
-                    "Uninstall started. Switched Bar will close now.",
-                    "Switched Bar",
+                    $"Uninstall started. {AppInstaller.DisplayName} will close now.",
+                    AppInstaller.DisplayName,
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
                 Close();
@@ -996,7 +996,7 @@ public partial class MainWindow : Window
             {
                 MessageBox.Show(
                     "Uninstalled. Auto-start and installed files have been removed.",
-                    "Switched Bar",
+                    AppInstaller.DisplayName,
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
             }
@@ -1005,7 +1005,7 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(
                 $"Uninstall failed.\n\n{ex.Message}",
-                "Switched Bar",
+                AppInstaller.DisplayName,
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }

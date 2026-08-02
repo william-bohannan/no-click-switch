@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace SwitchedBar;
+namespace NoClickSwitch;
 
 internal static class WindowActivator
 {
