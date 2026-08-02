@@ -25,6 +25,48 @@
             <Setter Property="Foreground" Value="#1A1A1A" />
             <Setter Property="FontSize" Value="13" />
         </Style>
+        <Style x:Key="NavSectionHeader" TargetType="ListBoxItem">
+            <Setter Property="IsEnabled" Value="False" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+            <Setter Property="Padding" Value="10,12,10,4" />
+            <Setter Property="Margin" Value="0,6,0,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <TextBlock Text="{TemplateBinding Content}"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Foreground="#888888" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="NavItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd"
+                                Background="Transparent"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#D8D8D8" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     <DockPanel>
         <!-- Title bar strip -->
@@ -90,119 +132,89 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- Left menu -->
+            <!-- Left nav: simple sections (no wizard steps) -->
             <Border Grid.Column="0"
                     Background="#E8E8E8"
                     BorderBrush="#D0D0D0"
                     BorderThickness="0,0,1,0">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top"
-                               Text="CUSTOMIZATION"
-                               FontSize="10"
-                               FontWeight="SemiBold"
-                               Foreground="#888888"
-                               Margin="14,14,14,6" />
-                    <!-- SelectionChanged is wired in code after init (avoids NRE while pages are still null). -->
-                    <ListBox x:Name="NavList"
-                             BorderThickness="0"
-                             Background="Transparent"
-                             Padding="6,0">
-                        <ListBox.ItemContainerStyle>
-                            <Style TargetType="ListBoxItem">
-                                <Setter Property="Padding" Value="10,8" />
-                                <Setter Property="Margin" Value="0,1" />
-                                <Setter Property="Cursor" Value="Hand" />
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="ListBoxItem">
-                                            <Border x:Name="Bd"
-                                                    Background="Transparent"
-                                                    CornerRadius="4"
-                                                    Padding="{TemplateBinding Padding}">
-                                                <ContentPresenter />
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#D8D8D8" />
-                                                </Trigger>
-                                                <Trigger Property="IsSelected" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#FFFFFF" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                        <!-- Glyphs: FullScreen, Color, Brightness, Stopwatch, Calculator, FontSize, QuietHours, Filter -->
-                        <ListBoxItem Tag="Mode">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE740;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Mode" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="Theme">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE790;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Theme" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="Appearance">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE706;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Opacity / blur" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="Hover">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE916;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Hover delay" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="Stats">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE9D9;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Stats" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="TabWidth">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE8E9;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Tab width" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="AutoHide">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE708;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Autohide" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="Exclude">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE71C;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Exclude list" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="Keyboard">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE765;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Keyboard" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="Monitors">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE7F4;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Monitors / tray" />
-                            </StackPanel>
-                        </ListBoxItem>
-                        <ListBoxItem Tag="Addons">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource NavIcon}" Text="&#xE71D;" />
-                                <TextBlock Style="{StaticResource NavLabel}" Text="Addons" />
-                            </StackPanel>
-                        </ListBoxItem>
-                    </ListBox>
-                </DockPanel>
+                <!-- SelectionChanged wired in code after init. -->
+                <ListBox x:Name="NavList"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         Padding="6,8"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBoxItem Style="{StaticResource NavSectionHeader}" Content="CUSTOMIZATION" />
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Mode">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE740;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Mode" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Theme">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE790;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Theme" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Appearance">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE706;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Opacity / blur" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Hover">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE916;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Hover delay" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Stats">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE9D9;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Stats" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="TabWidth">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE8E9;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Tab width" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="AutoHide">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE708;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Autohide" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Exclude">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE71C;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Exclude list" />
+                        </StackPanel>
+                    </ListBoxItem>
+
+                    <ListBoxItem Style="{StaticResource NavSectionHeader}" Content="SYSTEM" />
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Keyboard">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE765;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Keyboard" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Monitors">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE7F4;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Monitors / tray" />
+                        </StackPanel>
+                    </ListBoxItem>
+
+                    <ListBoxItem Style="{StaticResource NavSectionHeader}" Content="ADDONS" />
+                    <ListBoxItem Style="{StaticResource NavItem}" Tag="Addons">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavIcon}" Text="&#xE71D;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="Addons" />
+                        </StackPanel>
+                    </ListBoxItem>
+                </ListBox>
             </Border>
 
             <!-- Right content -->

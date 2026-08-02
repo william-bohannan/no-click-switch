@@ -88,17 +88,31 @@
                     Style="{StaticResource ChromeIconButton}"
                     VerticalAlignment="Center"
                     Margin="0,0,2,0"
+                    MouseEnter="MenuButton_MouseEnter"
                     Click="MenuButton_Click"
-                    ToolTip="Menu">
+                    ToolTipService.IsEnabled="False">
+                <!-- ToolTip disabled: hover opens the menu; ToolTip + ContextMenu fights and can crash. -->
                 <Button.ContextMenu>
                     <ContextMenu x:Name="AppMenu"
-                                 Opened="AppMenu_Opened">
+                                 Opened="AppMenu_Opened"
+                                 Closed="AppMenu_Closed">
                         <MenuItem x:Name="MenuSettings"
                                   Header="Settings"
                                   Click="MenuSettings_Click">
                             <MenuItem.Icon>
                                 <TextBlock FontFamily="{StaticResource FluentIconFont}"
                                            Text="&#xE713;" FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="MenuUpgrade"
+                                  Header="Upgrade"
+                                  Visibility="Collapsed"
+                                  Click="MenuUpgrade_Click"
+                                  ToolTip="Download and install the latest release">
+                            <MenuItem.Icon>
+                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                           Text="&#xE777;" FontSize="16"
                                            VerticalAlignment="Center" />
                             </MenuItem.Icon>
                         </MenuItem>
@@ -134,7 +148,7 @@
                             </MenuItem.Icon>
                         </MenuItem>
                         <MenuItem x:Name="MenuVersion"
-                                  Header="1.1.0"
+                                  Header="1.1.1"
                                   IsEnabled="False" />
                         <MenuItem x:Name="MenuGitHub"
                                   Header="GitHub"

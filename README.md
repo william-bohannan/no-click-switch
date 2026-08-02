@@ -51,8 +51,9 @@ You can also use **Uninstall** from the app’s ☰ menu.
 - Right: compact stats (**CPU/MEM %**, **up to 2 disks %**, **CPU/GPU °C**), **auto-hide**, **clock**
 - Disks: first two fixed drives (system drive preferred); 2nd row only if present
 - Temps via LibreHardwareMonitor (GPU row only if a sensor is found)
-- **Menu (☰)**:
+- **Menu (☰)** (hover to open):
   - **Settings** → customization (left nav + right form)
+  - **Upgrade to x.y.z** (only when a newer GitHub release exists) — runs the install script and restarts
   - **Install** / **Uninstall**
   - App name, version, **GitHub**, **Website**
   - **Close**

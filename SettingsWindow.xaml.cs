@@ -22,23 +22,60 @@ public partial class SettingsWindow : Window
 
     public SettingsWindow()
     {
-        // _loading stays true through InitializeComponent: sliders coerce Value and fire
-        // ValueChanged mid-parse, which must not call PersistFromUi (other controls are null).
-        InitializeComponent();
-        StatsOrderList.ItemsSource = _statsOrder;
-        ExcludeListBox.ItemsSource = _excludeRows;
-        BuildAccentSwatches();
-        LoadFromStore();
+        try
+        {
+            // _loading stays true through InitializeComponent: sliders coerce Value and fire
+            // ValueChanged mid-parse, which must not call PersistFromUi (other controls are null).
+            InitializeComponent();
+            StatsOrderList.ItemsSource = _statsOrder;
+            ExcludeListBox.ItemsSource = _excludeRows;
+            BuildAccentSwatches();
+            LoadFromStore();
 
-        // Wire nav only after every page panel exists — SelectionChanged during
-        // InitializeComponent used to NRE when PageKeyboard/PageMonitors were still null.
-        NavList.SelectionChanged += NavList_SelectionChanged;
-        if (NavList.Items.Count > 0)
-            NavList.SelectedIndex = 0;
-        else
-            ShowPage("Mode");
+            // Wire nav only after every page panel exists.
+            NavList.SelectionChanged += NavList_SelectionChanged;
+            // Defer first selection until layout is ready (avoids init re-entrancy).
+            Loaded += (_, _) =>
+            {
+                try
+                {
+                    if (NavList.SelectedItem is null)
+                        SelectStage("Mode");
+                    else if (NavList.SelectedItem is ListBoxItem { Tag: string tag })
+                        ShowPage(tag);
+                }
+                catch
+                {
+                    // ignore
+                }
+            };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
 
-        _loading = false;
+    /// <summary>Select the stage ListBoxItem for <paramref name="tag"/> (skips section headers).</summary>
+    private void SelectStage(string tag)
+    {
+        if (NavList is null)
+        {
+            ShowPage(tag);
+            return;
+        }
+
+        foreach (var obj in NavList.Items)
+        {
+            if (obj is ListBoxItem item
+                && string.Equals(item.Tag as string, tag, StringComparison.Ordinal))
+            {
+                NavList.SelectedItem = item;
+                return;
+            }
+        }
+
+        ShowPage(tag);
     }
 
     private void BuildAccentSwatches()
@@ -153,10 +190,14 @@ public partial class SettingsWindow : Window
             if (NavList?.SelectedItem is not ListBoxItem item)
                 return;
 
-            // Tag may be on the ListBoxItem (we set Tag="Mode" etc. in XAML).
+            // Skip section headers (no Tag).
             var tag = item.Tag as string;
             if (string.IsNullOrEmpty(tag))
+            {
+                if (e.RemovedItems.Count > 0 && e.RemovedItems[0] is ListBoxItem prev)
+                    NavList.SelectedItem = prev;
                 return;
+            }
 
             ShowPage(tag);
         }

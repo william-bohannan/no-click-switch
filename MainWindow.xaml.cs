@@ -220,6 +220,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         AppSettingsStore.Instance.Changed += (_, _) =>
             Dispatcher.Invoke(ApplySettings);
+
+        // Update check result may arrive after the menu was last opened.
+        AppUpdateChecker.Changed += (_, _) =>
+            Dispatcher.BeginInvoke(RefreshAppMenu, DispatcherPriority.Background);
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -252,6 +256,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             PositionAsTopBar();
             SyncBarHeight(animate: false);
         }, DispatcherPriority.Loaded);
+
+        // Primary bar only: check GitHub for a newer release (throttled).
+        if (IsPrimaryBar)
+        {
+            Dispatcher.BeginInvoke(() => AppUpdateChecker.CheckInBackground(force: true),
+                DispatcherPriority.ApplicationIdle);
+        }
+
         _refreshTimer.Start();
         _clockTimer.Start();
         _activeTabTimer.Start();
@@ -1716,33 +1728,144 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return (x, y, Math.Max(1, w), Math.Max(1, h));
     }
 
-    private void MenuButton_Click(object sender, RoutedEventArgs e)
+    private bool _appMenuOpen;
+
+    private void MenuButton_MouseEnter(object sender, MouseEventArgs e)
     {
-        if (MenuButton.ContextMenu is null)
+        // Defer past the enter event — opening a ContextMenu synchronously on MouseEnter
+        // re-enters layout/input and can NullRef with topmost windows.
+        if (_appMenuOpen || MenuButton.ContextMenu?.IsOpen == true)
             return;
 
-        RefreshAppMenu();
-        MenuButton.ContextMenu.PlacementTarget = MenuButton;
-        MenuButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
-        MenuButton.ContextMenu.IsOpen = true;
+        Dispatcher.BeginInvoke(OpenAppMenu, DispatcherPriority.Input);
+    }
+
+    private void MenuButton_Click(object sender, RoutedEventArgs e)
+        => OpenAppMenu();
+
+    private void OpenAppMenu()
+    {
+        try
+        {
+            var menu = MenuButton?.ContextMenu ?? AppMenu;
+            if (menu is null || MenuButton is null)
+                return;
+
+            if (menu.IsOpen)
+                return;
+
+            // Refresh upgrade availability when the menu is used (async; safe).
+            AppUpdateChecker.CheckInBackground(force: false);
+            RefreshAppMenu();
+
+            menu.PlacementTarget = MenuButton;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            menu.HorizontalOffset = 0;
+            menu.VerticalOffset = 2;
+            menu.IsOpen = true;
+            _appMenuOpen = true;
+        }
+        catch
+        {
+            _appMenuOpen = false;
+            // Never let the hamburger take down the app.
+        }
     }
 
     private void AppMenu_Opened(object sender, RoutedEventArgs e)
     {
-        RefreshAppMenu();
+        _appMenuOpen = true;
+        try
+        {
+            RefreshAppMenu();
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void AppMenu_Closed(object sender, RoutedEventArgs e)
+    {
+        _appMenuOpen = false;
     }
 
     private void RefreshAppMenu()
     {
+        if (MenuInstall is null)
+            return;
+
         var installed = AppInstaller.IsInstalled;
         MenuInstall.Visibility = installed ? Visibility.Collapsed : Visibility.Visible;
-        MenuUninstall.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
-        MenuAppName.Header = $"{AppInstaller.DisplayName} ({AppInstaller.ShortName})";
-        MenuVersion.Header = $"Version {AppInstaller.VersionString}";
-        MenuGitHub.Header = "GitHub";
-        MenuGitHub.ToolTip = AppInstaller.GitHubUrl;
-        MenuWebsite.Header = "Website";
-        MenuWebsite.ToolTip = AppInstaller.WebsiteUrl;
+        if (MenuUninstall is not null)
+            MenuUninstall.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
+        if (MenuAppName is not null)
+            MenuAppName.Header = $"{AppInstaller.DisplayName} ({AppInstaller.ShortName})";
+        if (MenuVersion is not null)
+            MenuVersion.Header = $"Version {AppInstaller.VersionString}";
+        if (MenuGitHub is not null)
+        {
+            MenuGitHub.Header = "GitHub";
+            MenuGitHub.ToolTip = AppInstaller.GitHubUrl;
+        }
+
+        if (MenuWebsite is not null)
+        {
+            MenuWebsite.Header = "Website";
+            MenuWebsite.ToolTip = AppInstaller.WebsiteUrl;
+        }
+
+        if (MenuUpgrade is null)
+            return;
+
+        if (AppUpdateChecker.IsUpdateAvailable
+            && AppUpdateChecker.AvailableVersion is { } remote)
+        {
+            MenuUpgrade.Visibility = Visibility.Visible;
+            MenuUpgrade.Header = $"Upgrade to {remote}";
+            MenuUpgrade.ToolTip =
+                $"Install {AppUpdateChecker.AvailableTag ?? remote} (current: {AppInstaller.VersionString})";
+        }
+        else
+        {
+            MenuUpgrade.Visibility = Visibility.Collapsed;
+            MenuUpgrade.Header = "Upgrade";
+        }
+    }
+
+    private void MenuUpgrade_Click(object sender, RoutedEventArgs e)
+    {
+        var remote = AppUpdateChecker.AvailableVersion ?? "latest";
+        var result = MessageBox.Show(
+            $"Upgrade {AppInstaller.DisplayName} to {remote}?\n\n" +
+            "This downloads the latest release, replaces the installed app, and restarts NCS.\n" +
+            $"(Current version: {AppInstaller.VersionString})",
+            "Upgrade",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        if (!AppUpdateChecker.StartUpgrade())
+        {
+            MessageBox.Show(
+                "Could not start the upgrade.\n\n" +
+                "You can upgrade manually with:\n" +
+                "  irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex",
+                AppInstaller.DisplayName,
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        // Installer stops this process; if it doesn't, leave a note.
+        MessageBox.Show(
+            "Upgrade started in PowerShell.\n\n" +
+            "NCS will close and relaunch when the install finishes.",
+            AppInstaller.DisplayName,
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 
     private void MenuClose_Click(object sender, RoutedEventArgs e)
