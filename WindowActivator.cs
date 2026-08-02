@@ -7,6 +7,7 @@ internal static class WindowActivator
     private const uint SwRestore = 9;
     private const uint SwShow = 5;
     private const uint SwShowNoActivate = 4;
+    private const uint WmClose = 0x0010;
 
     private static readonly IntPtr HwndTop = IntPtr.Zero;
     private static readonly IntPtr HwndTopmost = new(-1);
@@ -30,6 +31,21 @@ internal static class WindowActivator
     {
         ForceForeground(hWnd, activate: true);
     }
+
+    /// <summary>
+    /// Ask the window to close (WM_CLOSE). Apps can still prompt to save, etc.
+    /// </summary>
+    public static void CloseWindow(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero || !IsWindow(hWnd))
+            return;
+
+        _ = PostMessage(hWnd, WmClose, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    /// <summary>True while the HWND is still a live window.</summary>
+    public static bool IsAlive(IntPtr hWnd)
+        => hWnd != IntPtr.Zero && IsWindow(hWnd);
 
     /// <summary>
     /// Force this process's window into the foreground so later activations succeed.
@@ -161,6 +177,9 @@ internal static class WindowActivator
                 _ = AttachThreadInput(thisThread, fgThread, false);
         }
     }
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);

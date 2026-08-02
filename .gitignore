@@ -28,6 +28,7 @@ bld/
 [Dd]ebugPublic/
 [Rr]eleases/
 publish/
+SwitchedBar-win-x64.zip
 *.dll
 *.exe
 *.pdb

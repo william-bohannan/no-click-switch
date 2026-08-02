@@ -788,6 +788,78 @@ public partial class MainWindow : Window
         UpdateActiveTab();
     }
 
+    private void TabClose_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem)
+            return;
+
+        // ContextMenu is a popup: resolve WindowEntry from PlacementTarget (tab Border).
+        var entry = menuItem.DataContext as WindowEntry;
+        if (entry is null
+            && menuItem.Parent is ContextMenu { PlacementTarget: FrameworkElement target })
+        {
+            entry = target.Tag as WindowEntry
+                ?? target.DataContext as WindowEntry;
+        }
+
+        if (entry is null || entry.Handle == IntPtr.Zero)
+            return;
+
+        var handle = entry.Handle;
+        WindowActivator.CloseWindow(handle);
+
+        if (_lastAppForeground == handle)
+            _lastAppForeground = IntPtr.Zero;
+
+        // WM_CLOSE is async; remove the tab as soon as the window is actually gone
+        // (including after a save prompt). Don't wait for the slow refresh timer.
+        _ = WatchAndRemoveClosedTabAsync(handle);
+    }
+
+    /// <summary>
+    /// Poll until <paramref name="handle"/> is destroyed, then drop its tab immediately.
+    /// Stops early if the window is still alive after a long wait (e.g. user cancelled close).
+    /// </summary>
+    private async Task WatchAndRemoveClosedTabAsync(IntPtr handle)
+    {
+        // First chance after the UI message queue processes the close.
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+        if (TryRemoveTabIfClosed(handle))
+            return;
+
+        // Fast poll while the window is shutting down (or waiting on a dialog).
+        const int pollMs = 50;
+        const int maxMs = 120_000;
+        for (var waited = 0; waited < maxMs; waited += pollMs)
+        {
+            await Task.Delay(pollMs).ConfigureAwait(true);
+            if (TryRemoveTabIfClosed(handle))
+                return;
+        }
+    }
+
+    /// <summary>
+    /// If the HWND is gone (or no longer a listed top-level window), remove its tab.
+    /// Returns true when the tab was removed or was already absent.
+    /// </summary>
+    private bool TryRemoveTabIfClosed(IntPtr handle)
+    {
+        if (WindowActivator.IsAlive(handle))
+        {
+            // Still alive: keep tab (save dialogs, close cancelled, slow apps).
+            return false;
+        }
+
+        for (var i = _tabs.Count - 1; i >= 0; i--)
+        {
+            if (_tabs[i].Handle == handle)
+                _tabs.RemoveAt(i);
+        }
+
+        UpdateActiveTab();
+        return true;
+    }
+
     /// <summary>
     /// Rectangle under this bar, full primary width, down to the work-area bottom.
     /// Values are device pixels for Win32 SetWindowPos.
