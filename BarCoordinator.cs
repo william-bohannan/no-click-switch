@@ -28,6 +28,18 @@ internal sealed class BarCoordinator
         _started = true;
 
         _lastMonitorMode = AppSettingsStore.Instance.Current.MonitorMode;
+
+        // Enable taskbar auto-hide once for the whole session (not per-bar Loaded/Closed).
+        // Bar rebuilds used to Close() the owner and flip auto-hide off on multi-monitor.
+        try
+        {
+            TaskbarAutoHide.SetEnabled(true);
+        }
+        catch
+        {
+            // Best-effort; bars still work if shell API fails.
+        }
+
         RebuildBars();
 
         _hotkeys = new HotkeyService();
@@ -56,7 +68,39 @@ internal sealed class BarCoordinator
         foreach (var bar in _bars)
             bar.AllowClose = true;
         CloseAllBars();
+
+        // Restore the Windows taskbar when the app fully exits.
+        try
+        {
+            TaskbarAutoHide.SetEnabled(false);
+        }
+        catch
+        {
+            // Best-effort.
+        }
+
         SystemStatsReader.ShutdownShared();
+    }
+
+    /// <summary>HWND of every live NCS bar (exclude from window tabs).</summary>
+    public IReadOnlyList<IntPtr> GetBarHwnds()
+    {
+        var list = new List<IntPtr>(_bars.Count);
+        foreach (var bar in _bars)
+        {
+            try
+            {
+                var h = bar.GetBarHwnd();
+                if (h != IntPtr.Zero)
+                    list.Add(h);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return list;
     }
 
     public void OpenSettings()
@@ -176,16 +220,23 @@ internal sealed class BarCoordinator
         }
         else
         {
-            var first = true;
+            // One bar per monitor. Only the primary bar shows the taskbar auto-hide toggle
+            // (session auto-hide is owned by BarCoordinator, not individual bar Closed events).
             foreach (var m in monitors)
-            {
-                AddBar(m, ownsTaskbar: first && m.IsPrimary, isPrimaryBar: m.IsPrimary);
-                first = false;
-            }
+                AddBar(m, ownsTaskbar: m.IsPrimary, isPrimaryBar: m.IsPrimary);
 
-            // Ensure exactly one bar owns taskbar auto-hide (primary if present).
             if (_bars.All(b => !b.OwnsTaskbarAutoHide) && _bars.Count > 0)
                 _bars[0].OwnsTaskbarAutoHide = true;
+        }
+
+        // After monitor changes, re-apply whatever the user/session wants.
+        try
+        {
+            TaskbarAutoHide.ReassertDesired();
+        }
+        catch
+        {
+            // ignore
         }
 
         if (_barsVisible)

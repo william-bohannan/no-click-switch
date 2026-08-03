@@ -24,6 +24,9 @@ internal static class WindowActivator
     private const int WsMaximize = 0x01000000;
     private const uint LsfwUnlock = 2;
 
+    private const byte VkMenu = 0x12; // Alt
+    private const uint KeyeventfKeyup = 0x0002;
+
     /// <summary>
     /// Raise the window in z-order and make it the foreground window.
     /// Works even when our top bar was not clicked first (AttachThreadInput).
@@ -57,14 +60,14 @@ internal static class WindowActivator
         => hWnd != IntPtr.Zero && IsWindow(hWnd);
 
     /// <summary>
-    /// Force this process's window into the foreground so later activations succeed.
+    /// Claim foreground rights for this process without WPF Activate() (which can
+    /// fire MouseLeave on tabs and cancel hover-to-switch).
     /// </summary>
     public static void ForceOurWindowForeground(IntPtr ourHwnd)
     {
         if (ourHwnd == IntPtr.Zero || !IsWindow(ourHwnd))
             return;
 
-        // Our bar is topmost; just take foreground rights without z-order fights.
         var fg = GetForegroundWindow();
         if (fg == ourHwnd)
             return;
@@ -79,8 +82,13 @@ internal static class WindowActivator
 
             _ = LockSetForegroundWindow(LsfwUnlock);
             _ = AllowSetForegroundWindow(-1); // ASFW_ANY
-            _ = SetForegroundWindow(ourHwnd);
-            _ = SetActiveWindow(ourHwnd);
+            // Do not call SetForegroundWindow on the bar here — that steals focus from
+            // the hovered app tab path. Just unlock FG rights for the next BringToFront.
+            if (fgThread == 0 || fgThread == thisThread)
+            {
+                // Same-process peer bar is foreground: gently take FG on our bar.
+                _ = SetForegroundWindow(ourHwnd);
+            }
         }
         finally
         {
@@ -169,7 +177,13 @@ internal static class WindowActivator
                 _ = SetForegroundWindow(hWnd);
                 _ = SetActiveWindow(hWnd);
 
-                // Last-resort topmost flicker if Windows still blocked us.
+                // Hover-to-switch often lacks click FG rights — Alt pulse then topmost flicker.
+                if (GetForegroundWindow() != hWnd)
+                {
+                    PulseAltKey();
+                    _ = SetForegroundWindow(hWnd);
+                }
+
                 if (GetForegroundWindow() != hWnd)
                 {
                     _ = SetWindowPos(hWnd, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpShowWindow);
@@ -184,6 +198,23 @@ internal static class WindowActivator
                 _ = AttachThreadInput(thisThread, targetThread, false);
             if (attachedFg)
                 _ = AttachThreadInput(thisThread, fgThread, false);
+        }
+    }
+
+    /// <summary>
+    /// Synthesize a no-op Alt keypress so the process is allowed to call
+    /// SetForegroundWindow without a prior mouse click (hover-to-switch).
+    /// </summary>
+    private static void PulseAltKey()
+    {
+        try
+        {
+            keybd_event(VkMenu, 0, 0, UIntPtr.Zero);
+            keybd_event(VkMenu, 0, KeyeventfKeyup, UIntPtr.Zero);
+        }
+        catch
+        {
+            // Best-effort.
         }
     }
 
@@ -244,4 +275,7 @@ internal static class WindowActivator
 
     [DllImport("user32.dll")]
     private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 }

@@ -165,13 +165,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         Closing += MainWindow_Closing;
 
-        // When the mouse enters the bar, claim foreground rights so tab hover can
-        // activate real app windows without a prior click (and without taskbar peek).
-        // Skip while Start is open (or just opened) — reclaiming FG dismisses Start.
+        // When the mouse enters the bar, unlock foreground rights so tab hover can
+        // activate real app windows without a prior click. Avoid WPF Activate() here —
+        // that steals focus, often fires MouseLeave on tabs, and cancels hover-to-switch
+        // (especially with multiple topmost bars on dual monitors).
         PreviewMouseMove += (_, _) =>
         {
-            if (!IsActive && !StartMenuLauncher.ShouldSuppressForegroundSteal && !_barCollapsed)
-                EnsureBarForeground();
+            if (!StartMenuLauncher.ShouldSuppressForegroundSteal && !_barCollapsed)
+                EnsureBarForegroundRights();
         };
 
         _refreshTimer = new DispatcherTimer
@@ -181,6 +182,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _refreshTimer.Tick += (_, _) =>
         {
             RefreshTabs();
+            if (OwnsTaskbarAutoHide)
+            {
+                try
+                {
+                    TaskbarAutoHide.ReassertDesired();
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
             SyncTaskbarAutoHideToggle();
         };
 
@@ -233,16 +246,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PositionAsTopBar();
         RefreshTabs();
 
-        // On open: hide the Windows taskbar so this bar owns the edge (primary bar only).
+        // Session auto-hide is owned by BarCoordinator; primary bar only shows the toggle.
         if (OwnsTaskbarAutoHide)
         {
             try
             {
-                TaskbarAutoHide.SetEnabled(true);
+                TaskbarAutoHide.ReassertDesired();
             }
             catch
             {
-                // Best-effort; bar still works if shell API fails.
+                // Best-effort.
             }
         }
 
@@ -279,18 +292,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StopHeightAnimation();
         // Do not dispose shared stats here (other bars may still be sampling).
         _settingsWindow?.Close();
-        // Closing restores the Windows taskbar (primary bar only).
-        if (OwnsTaskbarAutoHide)
-        {
-            try
-            {
-                TaskbarAutoHide.SetEnabled(false);
-            }
-            catch
-            {
-                // Best-effort; don't block shutdown if shell API fails.
-            }
-        }
+        // Do NOT turn off taskbar auto-hide here — multi-monitor rebuilds Close()
+        // every bar; BarCoordinator restores the taskbar only on full app exit.
+    }
+
+    /// <summary>Native HWND for this bar (used to exclude NCS from window tabs).</summary>
+    public IntPtr GetBarHwnd()
+    {
+        if (_selfHwnd == IntPtr.Zero)
+            _selfHwnd = new WindowInteropHelper(this).Handle;
+        return _selfHwnd;
     }
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -343,7 +354,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ExpandBar();
 
         if (!StartMenuLauncher.ShouldSuppressForegroundSteal)
-            EnsureBarForeground();
+            EnsureBarForegroundRights();
     }
 
     private void Window_MouseLeave(object sender, MouseEventArgs e)
@@ -1043,7 +1054,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         MonitorInfo? filterMonitor = settings.MonitorMode == MonitorBarMode.AllMonitors
             ? _monitor
             : null;
-        var live = WindowEnumerator.GetOpenWindows(_selfHwnd, exclude, filterMonitor);
+        // Exclude every NCS bar (not just this one) so dual-monitor bars never tab each other.
+        var excludeBars = BarCoordinator.Instance.GetBarHwnds();
+        var live = WindowEnumerator.GetOpenWindows(_selfHwnd, exclude, filterMonitor, excludeBars);
         var liveByHandle = new Dictionary<IntPtr, WindowEntry>();
         foreach (var w in live)
         {
@@ -1209,12 +1222,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var wantEnabled = TaskbarAutoHideToggle.IsChecked == true;
         TaskbarAutoHide.SetEnabled(wantEnabled);
-        SyncTaskbarAutoHideToggle();
+        // Shell can lag a beat on multi-monitor; re-read after apply.
+        Dispatcher.BeginInvoke(SyncTaskbarAutoHideToggle, DispatcherPriority.Background);
     }
 
     #region Drag and drop reordering
 
-    private void EnsureBarForeground()
+    /// <summary>
+    /// Unlock SetForegroundWindow rights without WPF <see cref="Window.Activate"/>,
+    /// which cancels tab hover on multi-monitor (MouseLeave → pending hover cleared).
+    /// </summary>
+    private void EnsureBarForegroundRights()
     {
         if (StartMenuLauncher.ShouldSuppressForegroundSteal)
             return;
@@ -1225,10 +1243,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_selfHwnd == IntPtr.Zero)
             return;
 
-        // Take foreground without requiring a click first.
         WindowActivator.ForceOurWindowForeground(_selfHwnd);
-        if (!IsActive)
-            Activate();
     }
 
     private void Tab_MouseEnter(object sender, MouseEventArgs e)
@@ -1261,11 +1276,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void Tab_MouseLeave(object sender, MouseEventArgs e)
     {
         // Leaving a tab cancels a pending delayed activation.
-        if (sender is FrameworkElement { Tag: WindowEntry entry }
-            && ReferenceEquals(_pendingHoverEntry, entry))
+        // Ignore leave events caused by focus/z-order changes while still over the tab.
+        if (sender is not FrameworkElement { Tag: WindowEntry entry })
+            return;
+        if (!ReferenceEquals(_pendingHoverEntry, entry))
+            return;
+
+        // If the pointer is still inside this tab's bounds, keep the pending hover.
+        try
         {
-            CancelPendingHover();
+            var pos = e.GetPosition(sender as IInputElement);
+            if (sender is FrameworkElement fe
+                && pos.X >= 0 && pos.Y >= 0
+                && pos.X <= fe.ActualWidth && pos.Y <= fe.ActualHeight)
+            {
+                return;
+            }
         }
+        catch
+        {
+            // fall through to cancel
+        }
+
+        CancelPendingHover();
     }
 
     private void HoverDelayTimer_Tick(object? sender, EventArgs e)
@@ -1288,28 +1321,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ActivateOnHover(WindowEntry entry)
     {
-        // 1) Claim foreground from whatever app is active (may be Explorer/shell).
-        EnsureBarForeground();
-
-        // 2) Hand foreground to the real app window (not a taskbar button flash).
+        // Unlock FG rights, then hand focus to the real app (no WPF Activate on the bar).
+        EnsureBarForegroundRights();
         WindowActivator.BringToFront(entry.Handle);
         _lastAppForeground = entry.Handle;
         UpdateActiveTab();
-
-        // 3) Shell sometimes peeks/shows the taskbar on failed activation; re-assert.
         ReassertAutoHideIfNeeded();
     }
 
     private void ReassertAutoHideIfNeeded()
     {
-        // Keep auto-hide on when the toggle says it should be (default after open).
-        if (TaskbarAutoHideToggle.IsChecked != true)
+        // Keep session auto-hide if the user (or startup) wants it on.
+        if (TaskbarAutoHide.SessionDesired == false)
             return;
 
         try
         {
-            if (!TaskbarAutoHide.IsEnabled)
-                TaskbarAutoHide.SetEnabled(true);
+            TaskbarAutoHide.ReassertDesired();
         }
         catch
         {
@@ -1696,54 +1724,93 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     /// <summary>
     /// Rectangle under this bar, full monitor width, down to the usable bottom.
-    /// When the Windows taskbar is auto-hidden, uses the full monitor bottom —
-    /// <see cref="SystemParameters.WorkArea"/> / <c>rcWork</c> often still reserves
-    /// taskbar height even with auto-hide on, which left a gap above the edge.
-    /// Values are device pixels for Win32 SetWindowPos.
+    /// Computed in <b>device pixels from Win32 monitor rects</b> so dual-monitor
+    /// / per-monitor DPI layouts (including vertically stacked displays) expand
+    /// correctly. When taskbar auto-hide is on, uses full monitor bottom —
+    /// <c>rcWork</c> often still reserves taskbar height with auto-hide enabled.
     /// </summary>
     private (int X, int Y, int Width, int Height) GetFreeSpaceBelowBarInDevicePixels()
     {
         // Refresh monitor metrics so work/bounds match current taskbar state.
         RefreshMonitorGeometry();
 
-        var work = GetWorkAreaDip();
-        var bounds = GetMonitorBoundsDip();
-
-        // Horizontal: stay on this bar's monitor. With auto-hide, prefer full
-        // monitor width (side taskbars should not permanently reserve space).
+        var boundsPx = _monitor.BoundsPx;
+        var workPx = _monitor.WorkAreaPx;
         var autoHide = IsTaskbarAutoHideActive();
-        var areaLeft = autoHide ? bounds.Left : work.Left;
-        var areaWidth = autoHide ? bounds.Width : work.Width;
-        var areaBottom = autoHide ? bounds.Bottom : work.Bottom;
 
-        var barHeight = ActualHeight > 0 ? ActualHeight : Height;
-        if (barHeight <= 0)
-            barHeight = TabHeight + 12;
+        // Bar height in device pixels (use this window's DPI scale).
+        var barHeightDip = ActualHeight > 0 ? ActualHeight : Height;
+        if (barHeightDip <= 0)
+            barHeightDip = TabHeight + 12;
 
-        var dipLeft = Left;
-        // Prefer bar left if it is already aligned; otherwise use area left.
-        if (Math.Abs(dipLeft - areaLeft) > 1)
-            dipLeft = areaLeft;
+        var scaleY = 1.0;
+        var scaleX = 1.0;
+        try
+        {
+            var source = PresentationSource.FromVisual(this);
+            var toDevice = source?.CompositionTarget?.TransformToDevice;
+            if (toDevice is { } m)
+            {
+                scaleX = m.M11;
+                scaleY = m.M22;
+            }
+        }
+        catch
+        {
+            // fall back to 1.0
+        }
 
-        var dipTop = Top + barHeight;
-        var dipWidth = areaWidth;
-        var dipHeight = areaBottom - dipTop;
-        if (dipHeight < 1)
-            dipHeight = 1;
+        var barHeightPx = (int)Math.Max(1, Math.Round(barHeightDip * scaleY));
 
-        var source = PresentationSource.FromVisual(this);
-        var toDevice = source?.CompositionTarget?.TransformToDevice
-            ?? Matrix.Identity;
+        // Prefer live bar position in device pixels when available (handles stacked monitors).
+        int areaLeft;
+        int areaTop;
+        int areaRight;
+        int areaBottom;
+        if (autoHide)
+        {
+            areaLeft = (int)Math.Round(boundsPx.X);
+            areaTop = (int)Math.Round(boundsPx.Y);
+            areaRight = (int)Math.Round(boundsPx.X + boundsPx.Width);
+            areaBottom = (int)Math.Round(boundsPx.Y + boundsPx.Height);
+        }
+        else
+        {
+            areaLeft = (int)Math.Round(workPx.X);
+            areaTop = (int)Math.Round(workPx.Y);
+            areaRight = (int)Math.Round(workPx.X + workPx.Width);
+            areaBottom = (int)Math.Round(workPx.Y + workPx.Height);
+        }
 
-        var topLeft = toDevice.Transform(new Point(dipLeft, dipTop));
-        var bottomRight = toDevice.Transform(new Point(dipLeft + dipWidth, dipTop + dipHeight));
+        // If the bar's Win32 rect is available, start free space exactly under it.
+        var barBottomPx = areaTop + barHeightPx;
+        try
+        {
+            if (_selfHwnd != IntPtr.Zero
+                && GetWindowRectPx(_selfHwnd, out var brLeft, out var brTop, out var brRight, out var brBottom)
+                && brBottom > brTop)
+            {
+                barBottomPx = brBottom;
+                // Keep horizontal span on this monitor, not the bar's client quirks.
+                _ = brLeft;
+                _ = brRight;
+                _ = brTop;
+            }
+        }
+        catch
+        {
+            // use estimated bar height
+        }
 
-        var x = (int)Math.Round(topLeft.X);
-        var y = (int)Math.Round(topLeft.Y);
-        var w = (int)Math.Round(bottomRight.X - topLeft.X);
-        var h = (int)Math.Round(bottomRight.Y - topLeft.Y);
+        var x = areaLeft;
+        var y = barBottomPx;
+        var w = Math.Max(1, areaRight - areaLeft);
+        var h = Math.Max(1, areaBottom - y);
 
-        return (x, y, Math.Max(1, w), Math.Max(1, h));
+        // scaleX kept for future side-taskbar math; silence unused when autoHide path.
+        _ = scaleX;
+
+        return (x, y, w, h);
     }
 
     /// <summary>True when the shell taskbar is in auto-hide mode (or our toggle wants it on).</summary>
@@ -1751,6 +1818,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
+            if (TaskbarAutoHide.SessionDesired == true)
+                return true;
             if (TaskbarAutoHideToggle?.IsChecked == true)
                 return true;
             return TaskbarAutoHide.IsEnabled;
@@ -1760,6 +1829,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return false;
         }
     }
+
+    private static bool GetWindowRectPx(IntPtr hWnd, out int left, out int top, out int right, out int bottom)
+    {
+        left = top = right = bottom = 0;
+        if (hWnd == IntPtr.Zero)
+            return false;
+        if (!GetWindowRectNative(hWnd, out var rc))
+            return false;
+        left = rc.Left;
+        top = rc.Top;
+        right = rc.Right;
+        bottom = rc.Bottom;
+        return true;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowRect")]
+    private static extern bool GetWindowRectNative(IntPtr hWnd, out NativeRect lpRect);
 
     /// <summary>Re-read this bar's monitor bounds/work area from the system.</summary>
     private void RefreshMonitorGeometry()

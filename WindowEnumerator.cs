@@ -20,13 +20,20 @@ internal static class WindowEnumerator
     public static IReadOnlyList<WindowEntry> GetOpenWindows(
         IntPtr excludeHwnd,
         IReadOnlyList<ExcludeRule>? excludeRules = null,
-        MonitorInfo? onMonitor = null)
+        MonitorInfo? onMonitor = null,
+        IReadOnlyCollection<IntPtr>? excludeHwnds = null)
     {
         var results = new List<WindowEntry>();
         var rules = excludeRules ?? Array.Empty<ExcludeRule>();
+        HashSet<IntPtr>? extraExclude = null;
+        if (excludeHwnds is { Count: > 0 })
+            extraExclude = new HashSet<IntPtr>(excludeHwnds);
 
         EnumWindows((hWnd, _) =>
         {
+            if (extraExclude is not null && extraExclude.Contains(hWnd))
+                return true;
+
             if (!IsCandidate(hWnd, excludeHwnd))
                 return true;
 

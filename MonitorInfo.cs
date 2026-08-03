@@ -95,7 +95,10 @@ public sealed class MonitorInfo
 
         var cx = (rc.Left + rc.Right) / 2.0;
         var cy = (rc.Top + rc.Bottom) / 2.0;
-        return BoundsPx.Contains(cx, cy);
+        // Inclusive on all edges so windows snapped to the right/bottom border count.
+        // WPF Rect.Contains is right/bottom exclusive and can drop edge windows.
+        var b = BoundsPx;
+        return cx >= b.Left && cx <= b.Right && cy >= b.Top && cy <= b.Bottom;
     }
 
     private static double GetPrimaryDipScale()
