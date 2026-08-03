@@ -9,10 +9,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>NoClickSwitch</RootNamespace>
     <AssemblyName>NoClickSwitch</AssemblyName>
-    <Version>1.1.7</Version>
-    <AssemblyVersion>1.1.7.0</AssemblyVersion>
-    <FileVersion>1.1.7.0</FileVersion>
-    <InformationalVersion>1.1.7</InformationalVersion>
+    <Version>1.1.8</Version>
+    <AssemblyVersion>1.1.8.0</AssemblyVersion>
+    <FileVersion>1.1.8.0</FileVersion>
+    <InformationalVersion>1.1.8</InformationalVersion>
     <Product>No Click Switch</Product>
     <Company>william-bohannan</Company>
     <Authors>william-bohannan</Authors>
@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.4" />
+    <PackageReference Include="System.Management" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
