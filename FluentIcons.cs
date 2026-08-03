@@ -17,7 +17,10 @@ internal static class FluentIcons
 
     public const string GlobalNavButton = "\uE700";
     public const string Settings = "\uE713";
+    /// <summary>Legacy house glyph — Start button uses a drawn 4-pane Windows logo instead.</summary>
     public const string GoToStart = "\uE8FC";
+    /// <summary>2×2 grid (four squares). Prefer drawn Windows logo on the Start button.</summary>
+    public const string ViewAll = "\uE8A9";
     public const string Folder = "\uE8B7";
     public const string CommandPrompt = "\uE756";
     public const string ChevronDown = "\uE70D";

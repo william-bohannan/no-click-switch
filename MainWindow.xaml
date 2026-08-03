@@ -187,7 +187,7 @@
                 <TextBlock Style="{StaticResource ChromeIconText}" Text="&#xE700;" />
             </Button>
 
-            <!-- Start (GoToStart) -->
+            <!-- Start — Windows 4-pane logo (not GoToStart house glyph) -->
             <Button x:Name="StartButton"
                     Style="{StaticResource ChromeIconButton}"
                     VerticalAlignment="Center"
@@ -195,7 +195,21 @@
                     PreviewMouseLeftButtonDown="StartButton_PreviewMouseLeftButtonDown"
                     Click="StartButton_Click"
                     ToolTip="Start">
-                <TextBlock Style="{StaticResource ChromeIconText}" Text="&#xE8FC;" />
+                <Viewbox Width="14" Height="14" Stretch="Uniform"
+                         IsHitTestVisible="False"
+                         SnapsToDevicePixels="True">
+                    <!-- Classic 4-square Windows mark (monochrome chrome color) -->
+                    <Canvas Width="16" Height="16">
+                        <Rectangle Canvas.Left="0" Canvas.Top="0" Width="7" Height="7"
+                                   Fill="{DynamicResource ChromeIconBrush}" />
+                        <Rectangle Canvas.Left="9" Canvas.Top="0" Width="7" Height="7"
+                                   Fill="{DynamicResource ChromeIconBrush}" />
+                        <Rectangle Canvas.Left="0" Canvas.Top="9" Width="7" Height="7"
+                                   Fill="{DynamicResource ChromeIconBrush}" />
+                        <Rectangle Canvas.Left="9" Canvas.Top="9" Width="7" Height="7"
+                                   Fill="{DynamicResource ChromeIconBrush}" />
+                    </Canvas>
+                </Viewbox>
             </Button>
 
             <!-- File Explorer (Folder) — Ctrl+click = admin -->
