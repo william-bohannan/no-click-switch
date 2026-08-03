@@ -46,8 +46,8 @@ If no release zip is available, the PowerShell installer falls back to building 
 - Full-width bar pinned to the **top of the primary screen**
 - **Always on top**
 - **One tab per open window** (title + icon)
-- **Hover** a tab to bring that window to the front (blue highlight) — switch without a click
-- **Click** a tab to focus and fill the free space below the bar
+- **Hover** a tab to bring that window to the front and **fill the free space** under the bar (no click)
+- **Click** a tab does the same (focus + fill under the bar)
 - **Right-click** a tab → **Close window**
 - **Active window** tab uses a quiet grey highlight
 - **Drag tabs** to reorder; order is **kept** when the list refreshes

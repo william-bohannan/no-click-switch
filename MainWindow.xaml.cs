@@ -1321,11 +1321,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ActivateOnHover(WindowEntry entry)
     {
-        // Unlock FG rights, then hand focus to the real app (no WPF Activate on the bar).
+        // Unlock FG rights, then fit + focus the real app (same as click).
+        // Primary-monitor maximized windows used to only "come forward" without
+        // filling under the bar; ActivateAndFit now handles that reliably.
         EnsureBarForegroundRights();
-        WindowActivator.BringToFront(entry.Handle);
-        _lastAppForeground = entry.Handle;
-        UpdateActiveTab();
+        ActivateTab(entry);
         ReassertAutoHideIfNeeded();
     }
 
@@ -1647,7 +1647,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ActivateTab(WindowEntry entry)
     {
+        if (entry.Handle == IntPtr.Zero)
+            return;
+
         var free = GetFreeSpaceBelowBarInDevicePixels();
+        // Guard against a degenerate rect (can happen if monitor metrics are mid-change).
+        if (free.Width < 32 || free.Height < 32)
+        {
+            RefreshMonitorGeometry();
+            free = GetFreeSpaceBelowBarInDevicePixels();
+        }
+
         WindowActivator.ActivateAndFit(
             entry.Handle,
             free.X,
@@ -1728,6 +1738,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     /// / per-monitor DPI layouts (including vertically stacked displays) expand
     /// correctly. When taskbar auto-hide is on, uses full monitor bottom —
     /// <c>rcWork</c> often still reserves taskbar height with auto-hide enabled.
+    /// Primary uses the same path as secondary (bar HWND bottom → monitor bottom).
     /// </summary>
     private (int X, int Y, int Width, int Height) GetFreeSpaceBelowBarInDevicePixels()
     {
@@ -1738,77 +1749,70 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var workPx = _monitor.WorkAreaPx;
         var autoHide = IsTaskbarAutoHideActive();
 
-        // Bar height in device pixels (use this window's DPI scale).
-        var barHeightDip = ActualHeight > 0 ? ActualHeight : Height;
-        if (barHeightDip <= 0)
-            barHeightDip = TabHeight + 12;
+        // Always span the full monitor width for this bar's display.
+        // For height: with auto-hide use full monitor; otherwise work area
+        // (so a visible taskbar isn't covered). On primary, a peeking auto-hide
+        // taskbar can still report a reduced work bottom — prefer bounds when
+        // SessionDesired auto-hide is on.
+        var areaLeft = (int)Math.Round(boundsPx.X);
+        var areaRight = (int)Math.Round(boundsPx.X + boundsPx.Width);
+        var areaBottom = autoHide
+            ? (int)Math.Round(boundsPx.Y + boundsPx.Height)
+            : (int)Math.Round(workPx.Y + workPx.Height);
 
-        var scaleY = 1.0;
-        var scaleX = 1.0;
+        // If work area bottom is only a few pixels shy of the monitor (taskbar
+        // peek / mis-report), still use the full monitor bottom on primary.
+        var boundsBottom = (int)Math.Round(boundsPx.Y + boundsPx.Height);
+        if (!autoHide && boundsBottom - areaBottom is > 0 and < 12)
+            areaBottom = boundsBottom;
+        if (autoHide)
+            areaBottom = boundsBottom;
+
+        // Start free space exactly under this bar's live Win32 rect.
+        var barBottomPx = (int)Math.Round(boundsPx.Y) + 44;
         try
         {
+            var barHeightDip = ActualHeight > 0 ? ActualHeight : Height;
+            if (barHeightDip <= 0)
+                barHeightDip = TabHeight + 12;
+            var scaleY = 1.0;
             var source = PresentationSource.FromVisual(this);
             var toDevice = source?.CompositionTarget?.TransformToDevice;
             if (toDevice is { } m)
-            {
-                scaleX = m.M11;
                 scaleY = m.M22;
-            }
+            barBottomPx = (int)Math.Round(boundsPx.Y) + (int)Math.Max(1, Math.Round(barHeightDip * scaleY));
         }
         catch
         {
-            // fall back to 1.0
+            // keep estimate
         }
 
-        var barHeightPx = (int)Math.Max(1, Math.Round(barHeightDip * scaleY));
-
-        // Prefer live bar position in device pixels when available (handles stacked monitors).
-        int areaLeft;
-        int areaTop;
-        int areaRight;
-        int areaBottom;
-        if (autoHide)
-        {
-            areaLeft = (int)Math.Round(boundsPx.X);
-            areaTop = (int)Math.Round(boundsPx.Y);
-            areaRight = (int)Math.Round(boundsPx.X + boundsPx.Width);
-            areaBottom = (int)Math.Round(boundsPx.Y + boundsPx.Height);
-        }
-        else
-        {
-            areaLeft = (int)Math.Round(workPx.X);
-            areaTop = (int)Math.Round(workPx.Y);
-            areaRight = (int)Math.Round(workPx.X + workPx.Width);
-            areaBottom = (int)Math.Round(workPx.Y + workPx.Height);
-        }
-
-        // If the bar's Win32 rect is available, start free space exactly under it.
-        var barBottomPx = areaTop + barHeightPx;
         try
         {
             if (_selfHwnd != IntPtr.Zero
-                && GetWindowRectPx(_selfHwnd, out var brLeft, out var brTop, out var brRight, out var brBottom)
+                && GetWindowRectPx(_selfHwnd, out _, out var brTop, out _, out var brBottom)
                 && brBottom > brTop)
             {
                 barBottomPx = brBottom;
-                // Keep horizontal span on this monitor, not the bar's client quirks.
-                _ = brLeft;
-                _ = brRight;
-                _ = brTop;
             }
         }
         catch
         {
-            // use estimated bar height
+            // use estimate
         }
+
+        // Clamp to this monitor — never let a bad bar rect expand onto the other display.
+        var monTop = (int)Math.Round(boundsPx.Y);
+        var monBottom = boundsBottom;
+        if (barBottomPx < monTop)
+            barBottomPx = monTop;
+        if (barBottomPx > monBottom - 32)
+            barBottomPx = monTop + 40;
 
         var x = areaLeft;
         var y = barBottomPx;
         var w = Math.Max(1, areaRight - areaLeft);
         var h = Math.Max(1, areaBottom - y);
-
-        // scaleX kept for future side-taskbar math; silence unused when autoHide path.
-        _ = scaleX;
 
         return (x, y, w, h);
     }

@@ -4,11 +4,12 @@ namespace NoClickSwitch;
 
 internal static class WindowActivator
 {
+    private const uint SwShowMinimized = 2;
     private const uint SwRestore = 9;
-    private const uint SwShow = 5;
     private const uint SwShowNoActivate = 4;
     private const uint SwMinimize = 6;
     private const uint WmClose = 0x0010;
+    private const uint WmExitSizeMove = 0x0232;
 
     private static readonly IntPtr HwndTop = IntPtr.Zero;
     private static readonly IntPtr HwndTopmost = new(-1);
@@ -22,7 +23,11 @@ internal static class WindowActivator
 
     private const int GwlStyle = -16;
     private const int WsMaximize = 0x01000000;
+    private const int WsMinimize = 0x20000000;
     private const uint LsfwUnlock = 2;
+
+    private const int WpfRestoreToMaximized = 0x0002;
+    private const int SwShowNormal = 1;
 
     private const byte VkMenu = 0x12; // Alt
     private const uint KeyeventfKeyup = 0x0002;
@@ -82,13 +87,8 @@ internal static class WindowActivator
 
             _ = LockSetForegroundWindow(LsfwUnlock);
             _ = AllowSetForegroundWindow(-1); // ASFW_ANY
-            // Do not call SetForegroundWindow on the bar here — that steals focus from
-            // the hovered app tab path. Just unlock FG rights for the next BringToFront.
             if (fgThread == 0 || fgThread == thisThread)
-            {
-                // Same-process peer bar is foreground: gently take FG on our bar.
                 _ = SetForegroundWindow(ourHwnd);
-            }
         }
         finally
         {
@@ -100,20 +100,109 @@ internal static class WindowActivator
     /// <summary>
     /// Bring the window to the foreground and size it to the given screen rectangle
     /// (device pixels). Restores out of minimized/maximized first so the size sticks.
+    /// Primary-monitor maximized apps often ignore a bare SetWindowPos — we use
+    /// SetWindowPlacement + style clear + a second SetWindowPos pass.
     /// </summary>
     public static void ActivateAndFit(IntPtr hWnd, int x, int y, int width, int height)
     {
         if (hWnd == IntPtr.Zero || width <= 0 || height <= 0 || !IsWindow(hWnd))
             return;
 
-        // Must leave maximized/minimized before SetWindowPos geometry will apply.
+        RestoreToNormalFrame(hWnd);
+        ApplyFrameRect(hWnd, x, y, width, height);
+
+        // Some apps (esp. maximized on the primary) re-assert maximize on activate.
+        // Apply geometry again after FG, then once more deferred.
+        ForceForeground(hWnd, activate: true);
+        ApplyFrameRect(hWnd, x, y, width, height);
+
+        // Deferred re-fit: Explorer / Chromium / Office often snap back after first paint.
+        _ = System.Threading.Tasks.Task.Run(async () =>
+        {
+            try
+            {
+                await System.Threading.Tasks.Task.Delay(50).ConfigureAwait(false);
+                if (!IsWindow(hWnd))
+                    return;
+                if (!IsCloseToRect(hWnd, x, y, width, height))
+                {
+                    RestoreToNormalFrame(hWnd);
+                    ApplyFrameRect(hWnd, x, y, width, height);
+                }
+
+                await System.Threading.Tasks.Task.Delay(120).ConfigureAwait(false);
+                if (!IsWindow(hWnd))
+                    return;
+                if (!IsCloseToRect(hWnd, x, y, width, height))
+                {
+                    RestoreToNormalFrame(hWnd);
+                    ApplyFrameRect(hWnd, x, y, width, height);
+                }
+            }
+            catch
+            {
+                // best-effort
+            }
+        });
+    }
+
+    private static void RestoreToNormalFrame(IntPtr hWnd)
+    {
+        // Clear placement "restore to maximized" so the next show isn't forced max.
+        try
+        {
+            var place = new WindowPlacement();
+            place.Length = Marshal.SizeOf<WindowPlacement>();
+            if (GetWindowPlacement(hWnd, ref place))
+            {
+                place.Flags &= ~WpfRestoreToMaximized;
+                if (place.ShowCmd == (int)SwShowMinimized || IsIconic(hWnd))
+                    place.ShowCmd = (int)SwRestore;
+                else if (IsZoomed(hWnd) || place.ShowCmd == 3 /* SW_MAXIMIZE */)
+                    place.ShowCmd = (int)SwRestore;
+                else
+                    place.ShowCmd = SwShowNormal;
+                _ = SetWindowPlacement(hWnd, ref place);
+            }
+        }
+        catch
+        {
+            // fall through
+        }
+
         if (IsIconic(hWnd) || IsZoomed(hWnd))
             ShowWindow(hWnd, SwRestore);
 
-        // Clear maximize style if it lingered (some apps keep it after restore).
+        // Strip maximize/minimize style bits that block SetWindowPos geometry.
         var style = GetWindowLong(hWnd, GwlStyle);
-        if ((style & WsMaximize) != 0)
-            _ = SetWindowLong(hWnd, GwlStyle, style & ~WsMaximize);
+        var cleared = style & ~WsMaximize & ~WsMinimize;
+        if (cleared != style)
+            _ = SetWindowLong(hWnd, GwlStyle, cleared);
+    }
+
+    private static void ApplyFrameRect(IntPtr hWnd, int x, int y, int width, int height)
+    {
+        // Preferred: SetWindowPlacement updates the "normal" rect apps restore to.
+        try
+        {
+            var place = new WindowPlacement();
+            place.Length = Marshal.SizeOf<WindowPlacement>();
+            _ = GetWindowPlacement(hWnd, ref place);
+            place.Flags &= ~WpfRestoreToMaximized;
+            place.ShowCmd = SwShowNormal; // SW_SHOWNORMAL
+            place.NormalPosition = new Rect
+            {
+                Left = x,
+                Top = y,
+                Right = x + width,
+                Bottom = y + height,
+            };
+            _ = SetWindowPlacement(hWnd, ref place);
+        }
+        catch
+        {
+            // continue with SetWindowPos
+        }
 
         _ = SetWindowPos(
             hWnd,
@@ -124,7 +213,19 @@ internal static class WindowActivator
             height,
             SwpShowWindow | SwpFrameChanged);
 
-        ForceForeground(hWnd, activate: true);
+        // Notify the app that a user-driven size finished (helps some frameworks).
+        _ = PostMessage(hWnd, WmExitSizeMove, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    private static bool IsCloseToRect(IntPtr hWnd, int x, int y, int width, int height)
+    {
+        if (!GetWindowRect(hWnd, out var rc))
+            return false;
+        const int tol = 8; // DWM shadows / frame differences
+        return Math.Abs(rc.Left - x) <= tol
+               && Math.Abs(rc.Top - y) <= tol
+               && Math.Abs((rc.Right - rc.Left) - width) <= tol * 2
+               && Math.Abs((rc.Bottom - rc.Top) - height) <= tol * 2;
     }
 
     private static void ForceForeground(IntPtr hWnd, bool activate)
@@ -132,15 +233,13 @@ internal static class WindowActivator
         if (hWnd == IntPtr.Zero || !IsWindow(hWnd))
             return;
 
+        // Never ShowWindow(SW_SHOW) after a fit — some shells re-maximize on primary.
         if (IsIconic(hWnd))
             ShowWindow(hWnd, activate ? SwRestore : SwShowNoActivate);
-        else if (activate)
-            ShowWindow(hWnd, SwShow);
 
         var fg = GetForegroundWindow();
         if (activate && fg == hWnd)
         {
-            // Still raise in case it is covered by non-foreground peers.
             _ = SetWindowPos(hWnd, HwndTop, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpShowWindow);
             return;
         }
@@ -153,7 +252,6 @@ internal static class WindowActivator
         var attachedTarget = false;
         try
         {
-            // Join input queues so SetForegroundWindow is allowed.
             if (fgThread != 0 && fgThread != thisThread)
                 attachedFg = AttachThreadInput(thisThread, fgThread, true);
             if (targetThread != 0 && targetThread != thisThread && targetThread != fgThread)
@@ -177,7 +275,6 @@ internal static class WindowActivator
                 _ = SetForegroundWindow(hWnd);
                 _ = SetActiveWindow(hWnd);
 
-                // Hover-to-switch often lacks click FG rights — Alt pulse then topmost flicker.
                 if (GetForegroundWindow() != hWnd)
                 {
                     PulseAltKey();
@@ -201,10 +298,6 @@ internal static class WindowActivator
         }
     }
 
-    /// <summary>
-    /// Synthesize a no-op Alt keypress so the process is allowed to call
-    /// SetForegroundWindow without a prior mouse click (hover-to-switch).
-    /// </summary>
     private static void PulseAltKey()
     {
         try
@@ -216,6 +309,33 @@ internal static class WindowActivator
         {
             // Best-effort.
         }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPlacement
+    {
+        public int Length;
+        public int Flags;
+        public int ShowCmd;
+        public Point MinPosition;
+        public Point MaxPosition;
+        public Rect NormalPosition;
     }
 
     [DllImport("user32.dll")]
@@ -241,6 +361,15 @@ internal static class WindowActivator
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out Rect lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowPlacement(IntPtr hWnd, ref WindowPlacement lpwndpl);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPlacement(IntPtr hWnd, ref WindowPlacement lpwndpl);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
