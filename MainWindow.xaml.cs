@@ -49,6 +49,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private WindowEntry? _pendingHoverEntry;
     private SettingsWindow? _settingsWindow;
     private MonitorInfo _monitor;
+    private long _lastFgRightsTick;
+    private int _taskbarReassertCounter;
+    private int _lastTabCount = -1;
     /// <summary>Display this bar is docked to.</summary>
     public MonitorInfo Monitor => _monitor;
 
@@ -165,24 +168,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         Closing += MainWindow_Closing;
 
-        // When the mouse enters the bar, unlock foreground rights so tab hover can
-        // activate real app windows without a prior click. Avoid WPF Activate() here —
-        // that steals focus, often fires MouseLeave on tabs, and cancels hover-to-switch
-        // (especially with multiple topmost bars on dual monitors).
+        // Unlock FG rights for hover-to-switch — throttled (every mousemove was costly).
         PreviewMouseMove += (_, _) =>
         {
-            if (!StartMenuLauncher.ShouldSuppressForegroundSteal && !_barCollapsed)
-                EnsureBarForegroundRights();
+            if (StartMenuLauncher.ShouldSuppressForegroundSteal || _barCollapsed)
+                return;
+            var now = Environment.TickCount64;
+            if (now - _lastFgRightsTick < 120)
+                return;
+            _lastFgRightsTick = now;
+            EnsureBarForegroundRights();
         };
 
+        // Dual monitors: each bar used to re-enum + re-icon everything on this timer.
+        // 2.0s is still snappy for new windows; icons are cached separately.
         _refreshTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromSeconds(1.5),
+            Interval = TimeSpan.FromSeconds(2.0),
         };
         _refreshTimer.Tick += (_, _) =>
         {
-            RefreshTabs();
-            if (OwnsTaskbarAutoHide)
+            Perf.Time("UI.RefreshTabs", RefreshTabs, warnMs: 12);
+            // Taskbar reassert only on the owner bar, and not every tick.
+            if (OwnsTaskbarAutoHide && (++_taskbarReassertCounter % 3) == 0)
             {
                 try
                 {
@@ -192,9 +200,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 {
                     // ignore
                 }
-            }
 
-            SyncTaskbarAutoHideToggle();
+                SyncTaskbarAutoHideToggle();
+            }
         };
 
         _clockTimer = new DispatcherTimer
@@ -204,13 +212,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _clockTimer.Tick += (_, _) =>
         {
             UpdateClock();
-            UpdateSystemStats();
+            // Only the primary bar drives stats sampling work; secondary just paints shared values.
+            // (Sample() is also coalesced internally.)
+            Perf.Time("UI.UpdateSystemStats", UpdateSystemStats, warnMs: 20);
         };
 
-        // Track foreground window often enough that the active tab feels live.
+        // Foreground highlight — 500ms is plenty; 250ms * 2 bars was pure overhead.
         _activeTabTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(250),
+            Interval = TimeSpan.FromMilliseconds(500),
         };
         _activeTabTimer.Tick += (_, _) => UpdateActiveTab();
 
@@ -816,6 +826,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void UpdateSystemStats()
     {
+        // Secondary bars still call Sample() but it returns immediately when fresh (<400ms).
         _stats.Sample();
 
         // Stack 1: CPU / MEM
@@ -1064,14 +1075,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             liveByHandle[w.Handle] = w;
         }
 
+        var structureChanged = false;
+
         // Remove closed windows (preserve relative order of the rest).
         for (var i = _tabs.Count - 1; i >= 0; i--)
         {
             if (!liveByHandle.ContainsKey(_tabs[i].Handle))
+            {
                 _tabs.RemoveAt(i);
+                structureChanged = true;
+            }
         }
 
         // Update title / pin when it changes (keep same entry instance so bindings stick).
+        // Icons come from a cache — only assign when the instance actually changed.
         foreach (var tab in _tabs)
         {
             if (!liveByHandle.TryGetValue(tab.Handle, out var fresh))
@@ -1079,7 +1096,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (tab.Title != fresh.Title)
                 tab.Title = fresh.Title;
-            if (!ReferenceEquals(tab.Icon, fresh.Icon) && fresh.Icon is not null)
+            if (tab.Icon is null && fresh.Icon is not null)
                 tab.Icon = fresh.Icon;
             if (tab.ProcessName != fresh.ProcessName)
                 tab.ProcessName = fresh.ProcessName;
@@ -1091,17 +1108,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         foreach (var w in live)
         {
             if (known.Add(w.Handle))
+            {
                 _tabs.Add(w);
+                structureChanged = true;
+            }
         }
 
         ApplyPinnedSort(settings);
 
         UpdateActiveTab();
-        Dispatcher.BeginInvoke(() =>
+
+        // Height/width layout is expensive — only when tab count changes.
+        if (structureChanged || _tabs.Count != _lastTabCount)
         {
-            EnsureFullWidth();
-            ScheduleBarHeightSync(animate: true);
-        }, DispatcherPriority.Loaded);
+            _lastTabCount = _tabs.Count;
+            Dispatcher.BeginInvoke(() =>
+            {
+                EnsureFullWidth();
+                ScheduleBarHeightSync(animate: true);
+            }, DispatcherPriority.Background);
+        }
     }
 
     /// <summary>Pinned tabs first (settings order), then unpinned (user order preserved).</summary>

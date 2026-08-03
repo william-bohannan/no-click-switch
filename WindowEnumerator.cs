@@ -8,7 +8,8 @@ namespace NoClickSwitch;
 
 /// <summary>
 /// Enumerates visible top-level windows suitable for task-switcher style tabs
-/// (one tab per open window).
+/// (one tab per open window). Icons and process names are cached — re-fetching
+/// icons every tick was a major source of UI jank on multi-monitor setups.
 /// </summary>
 internal static class WindowEnumerator
 {
@@ -17,14 +18,87 @@ internal static class WindowEnumerator
     private const int WsExAppwindow = 0x00040000;
     private const uint GwOwner = 4;
 
+    private static readonly object CacheGate = new();
+    private static readonly Dictionary<IntPtr, BitmapSource?> IconCache = new();
+    private static readonly Dictionary<IntPtr, string> ProcessNameCache = new();
+    private static List<WindowEntry>? _allCache;
+    private static DateTime _allCacheUtc = DateTime.MinValue;
+    private static int _allCacheExcludeHash;
+    private const int AllCacheTtlMs = 400;
+
     public static IReadOnlyList<WindowEntry> GetOpenWindows(
         IntPtr excludeHwnd,
         IReadOnlyList<ExcludeRule>? excludeRules = null,
         MonitorInfo? onMonitor = null,
         IReadOnlyCollection<IntPtr>? excludeHwnds = null)
     {
-        var results = new List<WindowEntry>();
-        var rules = excludeRules ?? Array.Empty<ExcludeRule>();
+        return Perf.Time("WindowEnum.GetOpenWindows", () =>
+        {
+            var rules = excludeRules ?? Array.Empty<ExcludeRule>();
+            var excludeHash = HashExcludes(excludeHwnd, excludeHwnds, rules);
+
+            // Dual bars refresh nearly together — share one full enum for a few hundred ms.
+            List<WindowEntry> all;
+            lock (CacheGate)
+            {
+                if (_allCache is not null
+                    && _allCacheExcludeHash == excludeHash
+                    && (DateTime.UtcNow - _allCacheUtc).TotalMilliseconds < AllCacheTtlMs)
+                {
+                    all = _allCache;
+                }
+                else
+                {
+                    all = EnumerateAll(excludeHwnd, rules, excludeHwnds);
+                    _allCache = all;
+                    _allCacheUtc = DateTime.UtcNow;
+                    _allCacheExcludeHash = excludeHash;
+                    PruneCaches(all);
+                }
+            }
+
+            if (onMonitor is null)
+                return all;
+
+            // Per-monitor filter (cheap — no re-enum, no icon fetch).
+            var filtered = new List<WindowEntry>(all.Count);
+            foreach (var w in all)
+            {
+                if (onMonitor.ContainsWindowCenter(w.Handle))
+                    filtered.Add(w);
+            }
+
+            return filtered;
+        }, warnMs: 12);
+    }
+
+    private static int HashExcludes(
+        IntPtr excludeHwnd,
+        IReadOnlyCollection<IntPtr>? excludeHwnds,
+        IReadOnlyList<ExcludeRule> rules)
+    {
+        unchecked
+        {
+            var h = excludeHwnd.GetHashCode() * 397;
+            if (excludeHwnds is not null)
+            {
+                foreach (var e in excludeHwnds)
+                    h = (h * 31) + e.GetHashCode();
+            }
+
+            h = (h * 31) + rules.Count;
+            foreach (var r in rules)
+                h = (h * 31) + (r.Pattern?.GetHashCode(StringComparison.OrdinalIgnoreCase) ?? 0);
+            return h;
+        }
+    }
+
+    private static List<WindowEntry> EnumerateAll(
+        IntPtr excludeHwnd,
+        IReadOnlyList<ExcludeRule> rules,
+        IReadOnlyCollection<IntPtr>? excludeHwnds)
+    {
+        var results = new List<WindowEntry>(32);
         HashSet<IntPtr>? extraExclude = null;
         if (excludeHwnds is { Count: > 0 })
             extraExclude = new HashSet<IntPtr>(excludeHwnds);
@@ -44,17 +118,13 @@ internal static class WindowEnumerator
             if (WindowExclude.IsExcluded(hWnd, title, rules))
                 return true;
 
-            // Per-monitor bars: only windows whose center sits on this display.
-            if (onMonitor is not null && !onMonitor.ContainsWindowCenter(hWnd))
-                return true;
-
-            var processName = WindowExclude.TryGetProcessNamePublic(hWnd);
+            var processName = GetCachedProcessName(hWnd);
 
             results.Add(new WindowEntry
             {
                 Handle = hWnd,
                 Title = title,
-                Icon = TryGetIcon(hWnd),
+                Icon = GetCachedIcon(hWnd),
                 ProcessName = processName,
             });
 
@@ -62,6 +132,56 @@ internal static class WindowEnumerator
         }, IntPtr.Zero);
 
         return results;
+    }
+
+    private static void PruneCaches(List<WindowEntry> live)
+    {
+        var liveSet = new HashSet<IntPtr>(live.Count);
+        foreach (var w in live)
+            liveSet.Add(w.Handle);
+
+        // Drop icons/names for windows that are gone (avoid unbounded growth).
+        if (IconCache.Count > liveSet.Count + 16)
+        {
+            var dead = IconCache.Keys.Where(k => !liveSet.Contains(k)).ToList();
+            foreach (var k in dead)
+                IconCache.Remove(k);
+        }
+
+        if (ProcessNameCache.Count > liveSet.Count + 16)
+        {
+            var dead = ProcessNameCache.Keys.Where(k => !liveSet.Contains(k)).ToList();
+            foreach (var k in dead)
+                ProcessNameCache.Remove(k);
+        }
+    }
+
+    private static string GetCachedProcessName(IntPtr hWnd)
+    {
+        lock (CacheGate)
+        {
+            if (ProcessNameCache.TryGetValue(hWnd, out var name))
+                return name;
+        }
+
+        var resolved = WindowExclude.TryGetProcessNamePublic(hWnd) ?? "";
+        lock (CacheGate)
+            ProcessNameCache[hWnd] = resolved;
+        return resolved;
+    }
+
+    private static BitmapSource? GetCachedIcon(IntPtr hWnd)
+    {
+        lock (CacheGate)
+        {
+            if (IconCache.TryGetValue(hWnd, out var cached))
+                return cached;
+        }
+
+        var icon = FetchIcon(hWnd);
+        lock (CacheGate)
+            IconCache[hWnd] = icon;
+        return icon;
     }
 
     private static bool IsCandidate(IntPtr hWnd, IntPtr excludeHwnd)
@@ -76,16 +196,13 @@ internal static class WindowEnumerator
         var hasAppWindow = (exStyle & WsExAppwindow) != 0;
         var hasToolWindow = (exStyle & WsExToolwindow) != 0;
 
-        // Tool windows stay off the taskbar unless they opt into APPWINDOW.
         if (hasToolWindow && !hasAppWindow)
             return false;
 
-        // Owned windows (dialogs) are skipped unless they request APPWINDOW.
         var owner = GetWindow(hWnd, GwOwner);
         if (owner != IntPtr.Zero && !hasAppWindow)
             return false;
 
-        // Skip cloaked UWP shells (invisible but still "visible" to Win32).
         if (IsCloaked(hWnd))
             return false;
 
@@ -111,11 +228,12 @@ internal static class WindowEnumerator
         return sb.ToString();
     }
 
-    private static BitmapSource? TryGetIcon(IntPtr hWnd)
+    private static BitmapSource? FetchIcon(IntPtr hWnd)
     {
         try
         {
-            var hIcon = SendMessage(hWnd, WmGeticon, IconBig, IntPtr.Zero);
+            // Prefer class small icon / small icon — fewer round-trips than big→small→small2.
+            var hIcon = GetClassLongPtr(hWnd, GclHiconsm);
             if (hIcon == IntPtr.Zero)
                 hIcon = SendMessage(hWnd, WmGeticon, IconSmall, IntPtr.Zero);
             if (hIcon == IntPtr.Zero)
@@ -123,7 +241,7 @@ internal static class WindowEnumerator
             if (hIcon == IntPtr.Zero)
                 hIcon = GetClassLongPtr(hWnd, GclHicon);
             if (hIcon == IntPtr.Zero)
-                hIcon = GetClassLongPtr(hWnd, GclHiconsm);
+                hIcon = SendMessage(hWnd, WmGeticon, IconBig, IntPtr.Zero);
             if (hIcon == IntPtr.Zero)
                 return null;
 

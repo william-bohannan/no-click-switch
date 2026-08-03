@@ -2,6 +2,7 @@ using System.IO;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using LibreHardwareMonitor.Hardware;
 
 namespace NoClickSwitch;
@@ -17,6 +18,8 @@ internal sealed class SystemStatsReader : IDisposable
     public static SystemStatsReader Shared { get; } = new();
 
     private readonly object _gate = new();
+    /// <summary>Separate from load/disk so UI sampling never waits on LibreHardwareMonitor.</summary>
+    private readonly object _tempGate = new();
 
     private long _idlePrev;
     private long _kernelPrev;
@@ -28,6 +31,7 @@ internal sealed class SystemStatsReader : IDisposable
     private int _tempsFailStreak;
     private DateTime _nextTempRetryUtc = DateTime.MinValue;
     private DateTime _lastSampleUtc = DateTime.MinValue;
+    private DateTime _lastTempSampleUtc = DateTime.MinValue;
     private DateTime _lastGoodTempUtc = DateTime.MinValue;
     private int? _lastGoodCpuTempC;
     private int? _lastGoodGpuTempC;
@@ -35,6 +39,10 @@ internal sealed class SystemStatsReader : IDisposable
     private string _debugPath = "";
     private DateTime _lastDebugLogUtc = DateTime.MinValue;
     private string _lastDebugLine = "";
+    private int _tempSampleBusy; // 0 = idle, 1 = background sample running
+
+    /// <summary>How often to poll LibreHardwareMonitor (expensive). Load/disk stay at Sample rate.</summary>
+    private static readonly TimeSpan TempSampleInterval = TimeSpan.FromSeconds(2.5);
 
     public int CpuPercent { get; private set; }
     public int MemPercent { get; private set; }
@@ -62,11 +70,43 @@ internal sealed class SystemStatsReader : IDisposable
                 return;
             _lastSampleUtc = now;
 
-            SampleCpu();
-            SampleMemory();
-            SampleDisks();
-            SampleTemperatures();
+            Perf.Time("Stats.CpuMemDisk", () =>
+            {
+                SampleCpu();
+                SampleMemory();
+                SampleDisks();
+            }, warnMs: 5);
         }
+
+        // LHM blocks 50–500ms — never run it on the UI thread.
+        RequestTemperatureSampleAsync();
+    }
+
+    private void RequestTemperatureSampleAsync()
+    {
+        var now = DateTime.UtcNow;
+        if (_computer is not null && (now - _lastTempSampleUtc) < TempSampleInterval)
+            return;
+        if (Interlocked.CompareExchange(ref _tempSampleBusy, 1, 0) != 0)
+            return;
+
+        _lastTempSampleUtc = now;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                lock (_tempGate)
+                    Perf.Time("Stats.Temperatures", SampleTemperatures, warnMs: 20);
+            }
+            catch
+            {
+                // best-effort
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _tempSampleBusy, 0);
+            }
+        });
     }
 
     private void SampleCpu()
@@ -182,16 +222,22 @@ internal sealed class SystemStatsReader : IDisposable
         {
             try
             {
-                // Prefer a simple Update walk — more reliable than Accept/IVisitor on some builds.
+                // Only update hardware that can expose temps (skip memory/network trees).
                 foreach (var hardware in _computer.Hardware)
                 {
                     hardwareCount++;
+                    if (!IsTempRelevant(hardware.HardwareType))
+                        continue;
                     UpdateHardwareTree(hardware);
                 }
 
                 var bag = new TempBag();
                 foreach (var hardware in _computer.Hardware)
+                {
+                    if (!IsTempRelevant(hardware.HardwareType))
+                        continue;
                     sensorCount += CollectTemps(hardware, bag);
+                }
 
                 cpu = bag.PickCpu(out cpuSource);
                 gpu = bag.PickGpu(out gpuSource);
@@ -301,6 +347,14 @@ internal sealed class SystemStatsReader : IDisposable
             $"hw={hardwareCount} sensors={sensorCount} computer={_computer is not null} " +
             $"status={_tempStatus}");
     }
+
+    private static bool IsTempRelevant(HardwareType type)
+        => type is HardwareType.Cpu
+            or HardwareType.GpuNvidia
+            or HardwareType.GpuAmd
+            or HardwareType.GpuIntel
+            or HardwareType.Motherboard
+            or HardwareType.SuperIO;
 
     private static void UpdateHardwareTree(IHardware hardware)
     {
@@ -652,11 +706,12 @@ internal sealed class SystemStatsReader : IDisposable
             };
             _computer.Open();
 
-            // Warm up sensors (first Update can be empty on some systems).
+            // One warm-up pass on temp-relevant devices only.
             foreach (var h in _computer.Hardware)
-                UpdateHardwareTree(h);
-            foreach (var h in _computer.Hardware)
-                UpdateHardwareTree(h);
+            {
+                if (IsTempRelevant(h.HardwareType))
+                    UpdateHardwareTree(h);
+            }
 
             _tempsFailStreak = 0;
             _tempStatus = "LibreHardwareMonitor open OK; hardware=" + _computer.Hardware.Count;
@@ -697,7 +752,7 @@ internal sealed class SystemStatsReader : IDisposable
     /// <summary>Called once when the app exits.</summary>
     public static void ShutdownShared()
     {
-        lock (Shared._gate)
+        lock (Shared._tempGate)
             Shared.ResetComputer();
     }
 
