@@ -89,6 +89,7 @@
                     VerticalAlignment="Center"
                     Margin="0,0,2,0"
                     MouseEnter="MenuButton_MouseEnter"
+                    PreviewMouseLeftButtonDown="MenuButton_PreviewMouseLeftButtonDown"
                     Click="MenuButton_Click"
                     ToolTipService.IsEnabled="False">
                 <!-- ToolTip disabled: hover opens the menu; ToolTip + ContextMenu fights and can crash. -->

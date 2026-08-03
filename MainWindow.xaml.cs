@@ -1931,24 +1931,69 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private bool _appMenuOpen;
+    /// <summary>
+    /// When the user clicks the hamburger while the menu is open, WPF often closes
+    /// the menu first then fires Click — without this flag Click would reopen it.
+    /// </summary>
+    private bool _suppressAppMenuOpen;
 
     private void MenuButton_MouseEnter(object sender, MouseEventArgs e)
     {
         // Defer past the enter event — opening a ContextMenu synchronously on MouseEnter
         // re-enters layout/input and can NullRef with topmost windows.
-        if (_appMenuOpen || MenuButton.ContextMenu?.IsOpen == true)
+        if (_appMenuOpen || MenuButton.ContextMenu?.IsOpen == true || _suppressAppMenuOpen)
             return;
 
         Dispatcher.BeginInvoke(OpenAppMenu, DispatcherPriority.Input);
     }
 
+    private void MenuButton_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // Toggle: click hamburger again while open → close (don't let Click re-open).
+        var menu = MenuButton?.ContextMenu ?? AppMenu;
+        if (menu is not null && (menu.IsOpen || _appMenuOpen))
+        {
+            menu.IsOpen = false;
+            _appMenuOpen = false;
+            _suppressAppMenuOpen = true;
+            e.Handled = true;
+        }
+    }
+
     private void MenuButton_Click(object sender, RoutedEventArgs e)
-        => OpenAppMenu();
+    {
+        if (_suppressAppMenuOpen)
+        {
+            _suppressAppMenuOpen = false;
+            return;
+        }
+
+        ToggleAppMenu();
+    }
+
+    private void ToggleAppMenu()
+    {
+        var menu = MenuButton?.ContextMenu ?? AppMenu;
+        if (menu is null || MenuButton is null)
+            return;
+
+        if (menu.IsOpen || _appMenuOpen)
+        {
+            menu.IsOpen = false;
+            _appMenuOpen = false;
+            return;
+        }
+
+        OpenAppMenu();
+    }
 
     private void OpenAppMenu()
     {
         try
         {
+            if (_suppressAppMenuOpen)
+                return;
+
             var menu = MenuButton?.ContextMenu ?? AppMenu;
             if (menu is null || MenuButton is null)
                 return;
@@ -1990,6 +2035,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void AppMenu_Closed(object sender, RoutedEventArgs e)
     {
         _appMenuOpen = false;
+        // Clear suppress on the next input tick so a deliberate re-hover can open again.
+        Dispatcher.BeginInvoke(() => { _suppressAppMenuOpen = false; }, DispatcherPriority.Input);
     }
 
     private void RefreshAppMenu()
