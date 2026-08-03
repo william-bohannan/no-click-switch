@@ -15,6 +15,8 @@ No admin rights. Installs to `%LocalAppData%\NoClickSwitch`, enables auto-start 
 
 ### PowerShell (recommended)
 
+Press **Win + R**, type `powershell`, and press Enter — then paste:
+
 ```powershell
 irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex
 ```
