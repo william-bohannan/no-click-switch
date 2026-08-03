@@ -1,6 +1,7 @@
 using System.IO;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Text;
 using LibreHardwareMonitor.Hardware;
 
 namespace NoClickSwitch;
@@ -16,7 +17,6 @@ internal sealed class SystemStatsReader : IDisposable
     public static SystemStatsReader Shared { get; } = new();
 
     private readonly object _gate = new();
-    private readonly UpdateVisitor _visitor = new();
 
     private long _idlePrev;
     private long _kernelPrev;
@@ -28,7 +28,13 @@ internal sealed class SystemStatsReader : IDisposable
     private int _tempsFailStreak;
     private DateTime _nextTempRetryUtc = DateTime.MinValue;
     private DateTime _lastSampleUtc = DateTime.MinValue;
-    private string _tempStatus = "CPU temperature: starting…";
+    private DateTime _lastGoodTempUtc = DateTime.MinValue;
+    private int? _lastGoodCpuTempC;
+    private int? _lastGoodGpuTempC;
+    private string _tempStatus = "CPU temperature: starting...";
+    private string _debugPath = "";
+    private DateTime _lastDebugLogUtc = DateTime.MinValue;
+    private string _lastDebugLine = "";
 
     public int CpuPercent { get; private set; }
     public int MemPercent { get; private set; }
@@ -79,7 +85,7 @@ internal sealed class SystemStatsReader : IDisposable
             _userPrev = userNow;
             _cpuPrimed = true;
             CpuPercent = 0;
-            CpuToolTip = "CPU: measuring…";
+            CpuToolTip = "CPU: measuring...";
             return;
         }
 
@@ -169,38 +175,50 @@ internal sealed class SystemStatsReader : IDisposable
         float? gpu = null;
         string? cpuSource = null;
         string? gpuSource = null;
+        var hardwareCount = 0;
+        var sensorCount = 0;
 
         if (_computer is not null)
         {
             try
             {
-                // Official LHM update path (hardware + sub-hardware).
-                _computer.Accept(_visitor);
+                // Prefer a simple Update walk — more reliable than Accept/IVisitor on some builds.
+                foreach (var hardware in _computer.Hardware)
+                {
+                    hardwareCount++;
+                    UpdateHardwareTree(hardware);
+                }
 
                 var bag = new TempBag();
                 foreach (var hardware in _computer.Hardware)
-                    CollectTemps(hardware, bag);
+                    sensorCount += CollectTemps(hardware, bag);
 
                 cpu = bag.PickCpu(out cpuSource);
                 gpu = bag.PickGpu(out gpuSource);
 
                 if (cpu is not null || gpu is not null)
                     _tempsFailStreak = 0;
+                else
+                    _tempStatus = $"LHM open; hardware={hardwareCount} tempSensors={sensorCount}; no CPU match";
             }
             catch (Exception ex)
             {
-                _tempStatus = "LibreHardwareMonitor error: " + ex.Message;
-                // Do not tear down on every glitch — dual-bar races used to thrash Open/Close.
+                _tempStatus = "LHM update error: " + ex.GetType().Name + ": " + ex.Message;
                 _tempsFailStreak++;
-                if (_tempsFailStreak >= 8)
+                // Only reset after sustained failure — thrashing Open/Close breaks the kernel driver.
+                if (_tempsFailStreak >= 30)
                 {
                     _tempsFailStreak = 0;
                     ResetComputer();
                 }
             }
         }
+        else
+        {
+            _tempStatus = "LHM not open (" + _tempStatus + ")";
+        }
 
-        // WMI thermal-zone fallback when LHM has no CPU reading (some locked-down PCs).
+        // WMI thermal-zone fallback when LHM has no CPU reading.
         if (cpu is null)
         {
             var wmi = TryReadWmiCpuTemp(out var wmiName);
@@ -211,8 +229,38 @@ internal sealed class SystemStatsReader : IDisposable
             }
         }
 
-        CpuTempC = cpu.HasValue ? (int)Math.Round(cpu.Value) : null;
-        GpuTempC = gpu.HasValue ? (int)Math.Round(gpu.Value) : null;
+        if (cpu.HasValue)
+        {
+            CpuTempC = (int)Math.Round(cpu.Value);
+            _lastGoodCpuTempC = CpuTempC;
+            _lastGoodTempUtc = DateTime.UtcNow;
+        }
+        else if (_lastGoodCpuTempC is int held
+                 && (DateTime.UtcNow - _lastGoodTempUtc).TotalSeconds < 45)
+        {
+            // Hold last good reading briefly through driver glitches.
+            CpuTempC = held;
+            cpuSource ??= "last good reading";
+        }
+        else
+        {
+            CpuTempC = null;
+        }
+
+        if (gpu.HasValue)
+        {
+            GpuTempC = (int)Math.Round(gpu.Value);
+            _lastGoodGpuTempC = GpuTempC;
+        }
+        else if (_lastGoodGpuTempC is int heldGpu
+                 && (DateTime.UtcNow - _lastGoodTempUtc).TotalSeconds < 45)
+        {
+            GpuTempC = heldGpu;
+        }
+        else
+        {
+            GpuTempC = null;
+        }
 
         if (CpuTempC is int ct)
         {
@@ -226,11 +274,10 @@ internal sealed class SystemStatsReader : IDisposable
             CpuTempToolTip =
                 "CPU temperature: unavailable\n" +
                 (_computer is null
-                    ? "LibreHardwareMonitor could not open (driver/admin).\n"
+                    ? "LibreHardwareMonitor could not open (sensor driver).\n"
                     : "No CPU package/core sensor found.\n") +
-                "Tip: some laptops need a one-time admin launch so the sensor driver can install.";
-            if (!string.IsNullOrEmpty(_tempStatus) && _tempStatus.Contains("error", StringComparison.OrdinalIgnoreCase))
-                CpuTempToolTip += "\n" + _tempStatus;
+                _tempStatus + "\n" +
+                "If this persists, restart No Click Switch from the Start menu.";
         }
 
         GpuTempToolTip = GpuTempC is int gt
@@ -242,11 +289,62 @@ internal sealed class SystemStatsReader : IDisposable
         if (CpuTempC is null && GpuTempC is null)
         {
             _tempsFailStreak++;
-            if (_tempsFailStreak >= 10)
+            if (_tempsFailStreak >= 30)
             {
                 _tempsFailStreak = 0;
                 ResetComputer();
             }
+        }
+
+        WriteDebugLog(
+            $"cpu={CpuTempC?.ToString() ?? "null"} gpu={GpuTempC?.ToString() ?? "null"} " +
+            $"hw={hardwareCount} sensors={sensorCount} computer={_computer is not null} " +
+            $"status={_tempStatus}");
+    }
+
+    private static void UpdateHardwareTree(IHardware hardware)
+    {
+        hardware.Update();
+        foreach (var sub in hardware.SubHardware)
+            UpdateHardwareTree(sub);
+    }
+
+    private void WriteDebugLog(string line)
+    {
+        try
+        {
+            // Log on change, errors, or at most once every 30s (keep disk quiet).
+            var now = DateTime.UtcNow;
+            var isError = line.Contains("fail", StringComparison.OrdinalIgnoreCase)
+                          || line.Contains("error", StringComparison.OrdinalIgnoreCase)
+                          || line.Contains("null", StringComparison.OrdinalIgnoreCase);
+            if (!isError
+                && line == _lastDebugLine
+                && (now - _lastDebugLogUtc).TotalSeconds < 30)
+                return;
+            _lastDebugLine = line;
+            _lastDebugLogUtc = now;
+
+            if (string.IsNullOrEmpty(_debugPath))
+            {
+                var dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    AppInstaller.AppName);
+                Directory.CreateDirectory(dir);
+                _debugPath = Path.Combine(dir, "stats-debug.log");
+            }
+
+            if (File.Exists(_debugPath) && new FileInfo(_debugPath).Length > 64 * 1024)
+                File.WriteAllText(_debugPath, "");
+
+            File.AppendAllText(
+                _debugPath,
+                DateTime.Now.ToString("HH:mm:ss.fff") + " " + line + Environment.NewLine,
+                Encoding.UTF8);
+        }
+        catch
+        {
+            // never break sampling for logging
         }
     }
 
@@ -308,10 +406,12 @@ internal sealed class SystemStatsReader : IDisposable
         }
     }
 
-    private static void CollectTemps(IHardware hardware, TempBag bag)
+    /// <returns>Number of temperature sensors seen under this hardware tree.</returns>
+    private static int CollectTemps(IHardware hardware, TempBag bag)
     {
+        var count = 0;
         foreach (var sub in hardware.SubHardware)
-            CollectTemps(sub, bag);
+            count += CollectTemps(sub, bag);
 
         var type = hardware.HardwareType;
         var isCpuHw = type == HardwareType.Cpu;
@@ -322,19 +422,24 @@ internal sealed class SystemStatsReader : IDisposable
         {
             if (sensor.SensorType != SensorType.Temperature)
                 continue;
-            if (sensor.Value is not float value)
+
+            // Value is float?; read carefully (avoid pattern quirks).
+            var raw = sensor.Value;
+            if (raw is null)
                 continue;
+            var value = raw.Value;
             if (float.IsNaN(value) || float.IsInfinity(value))
                 continue;
-            // Plausible silicon range (°C).
             if (value < 1 || value > 125)
                 continue;
 
+            count++;
             var name = sensor.Name ?? "";
+
             // "Distance to TjMax" is remaining headroom, not a die temperature.
             if (name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase)
-                || name.Contains("TjMax", StringComparison.OrdinalIgnoreCase)
-                   && name.Contains("Distance", StringComparison.OrdinalIgnoreCase))
+                || (name.Contains("TjMax", StringComparison.OrdinalIgnoreCase)
+                    && name.Contains("Distance", StringComparison.OrdinalIgnoreCase)))
                 continue;
 
             if (isCpuHw || (isBoardHw && LooksLikeCpuSensor(name)))
@@ -354,7 +459,6 @@ internal sealed class SystemStatsReader : IDisposable
                     bag.CpuCoreMaxName = $"{hardware.Name} / {name}";
                 }
                 else if (name.Contains("Core Average", StringComparison.OrdinalIgnoreCase)
-                         || name.Equals("Average", StringComparison.OrdinalIgnoreCase)
                          || name.Equals("CPU Core Average", StringComparison.OrdinalIgnoreCase))
                 {
                     bag.CpuCoreAverage = value;
@@ -372,43 +476,28 @@ internal sealed class SystemStatsReader : IDisposable
                 }
                 else
                 {
-                    // Generic die / "Temperature" on CPU hardware.
+                    // Any other temp on the CPU device (die, Tctl, unnamed, ...).
                     if (bag.CpuAny is null || value > bag.CpuAny)
                     {
                         bag.CpuAny = value;
                         bag.CpuAnyName = $"{hardware.Name} / {name}";
                     }
-
-                    if (IsPackageName(name) || name.Contains("Temperature", StringComparison.OrdinalIgnoreCase))
-                    {
-                        bag.CpuPackage ??= value;
-                        bag.CpuPackageName ??= $"{hardware.Name} / {name}";
-                    }
                 }
             }
             else if (isGpuHw)
             {
-                // Prefer "Core" / "GPU" named sensors; otherwise first reading wins.
                 var prefer = name.Contains("Core", StringComparison.OrdinalIgnoreCase)
                              || name.Contains("GPU", StringComparison.OrdinalIgnoreCase)
-                             || name.Contains("Hot Spot", StringComparison.OrdinalIgnoreCase)
                              || name.Equals("Temperature", StringComparison.OrdinalIgnoreCase);
                 if (bag.Gpu is null || prefer)
                 {
-                    if (bag.Gpu is null
-                        || name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                        || name.Equals("GPU Core", StringComparison.OrdinalIgnoreCase))
-                    {
-                        bag.Gpu = value;
-                        bag.GpuName = $"{hardware.Name} / {name}";
-                    }
+                    bag.Gpu = value;
+                    bag.GpuName = $"{hardware.Name} / {name}";
                 }
             }
-            else if (isBoardHw)
-            {
-                // Last-resort board CPU probe (already handled if LooksLikeCpuSensor).
-            }
         }
+
+        return count;
     }
 
     private static bool LooksLikeCpuSensor(string name)
@@ -433,7 +522,6 @@ internal sealed class SystemStatsReader : IDisposable
     {
         if (string.IsNullOrEmpty(current))
             return true;
-        // Prefer explicit Package / Tctl over generic "CPU".
         int Rank(string n) =>
             n.Contains("Package", StringComparison.OrdinalIgnoreCase) ? 3
             : n.Contains("Tctl", StringComparison.OrdinalIgnoreCase) || n.Contains("Tdie", StringComparison.OrdinalIgnoreCase) ? 2
@@ -448,10 +536,6 @@ internal sealed class SystemStatsReader : IDisposable
            && !name.Contains("Max", StringComparison.OrdinalIgnoreCase)
            && !name.Contains("Distance", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Fallback via Windows thermal performance counters (often a package zone).
-    /// Values are already °C on modern Windows.
-    /// </summary>
     private static float? TryReadWmiCpuTemp(out string source)
     {
         source = "";
@@ -470,10 +554,8 @@ internal sealed class SystemStatsReader : IDisposable
                     if (obj["Temperature"] is not { } raw)
                         continue;
                     var t = Convert.ToSingle(raw);
-                    // Some systems report Kelvin-like or zero when unsupported.
                     if (t < 1 || t > 125)
                         continue;
-                    // Prefer zones that mention CPU / package.
                     var prefer = name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
                                  || name.Contains("Package", StringComparison.OrdinalIgnoreCase)
                                  || name.Contains("TZ00", StringComparison.OrdinalIgnoreCase);
@@ -499,10 +581,9 @@ internal sealed class SystemStatsReader : IDisposable
         }
         catch
         {
-            // class missing on this SKU
+            // class missing
         }
 
-        // Older ACPI thermal zones: tenths of Kelvin.
         try
         {
             using var searcher = new ManagementObjectSearcher(
@@ -546,6 +627,17 @@ internal sealed class SystemStatsReader : IDisposable
         _tempsOpenAttempted = true;
         try
         {
+            // Ensure driver sidecar is next to the executable (LHM loads process-name.sys).
+            try
+            {
+                var baseDir = AppContext.BaseDirectory;
+                WriteDebugLog($"EnsureComputer baseDir={baseDir} sys={File.Exists(Path.Combine(baseDir, "NoClickSwitch.sys"))}");
+            }
+            catch
+            {
+                // ignore
+            }
+
             _computer = new Computer
             {
                 IsCpuEnabled = true,
@@ -559,16 +651,23 @@ internal sealed class SystemStatsReader : IDisposable
                 IsPsuEnabled = false,
             };
             _computer.Open();
-            // First Accept so sensors populate before the next UI tick.
-            _computer.Accept(_visitor);
+
+            // Warm up sensors (first Update can be empty on some systems).
+            foreach (var h in _computer.Hardware)
+                UpdateHardwareTree(h);
+            foreach (var h in _computer.Hardware)
+                UpdateHardwareTree(h);
+
             _tempsFailStreak = 0;
-            _tempStatus = "LibreHardwareMonitor open";
+            _tempStatus = "LibreHardwareMonitor open OK; hardware=" + _computer.Hardware.Count;
+            WriteDebugLog(_tempStatus);
         }
         catch (Exception ex)
         {
             _computer = null;
-            _tempStatus = "LibreHardwareMonitor open failed: " + ex.Message;
-            _nextTempRetryUtc = DateTime.UtcNow.AddSeconds(15);
+            _tempStatus = "LibreHardwareMonitor open failed: " + ex.GetType().Name + ": " + ex.Message;
+            _nextTempRetryUtc = DateTime.UtcNow.AddSeconds(10);
+            WriteDebugLog(_tempStatus);
         }
     }
 
@@ -585,7 +684,8 @@ internal sealed class SystemStatsReader : IDisposable
 
         _computer = null;
         _tempsOpenAttempted = false;
-        _nextTempRetryUtc = DateTime.UtcNow.AddSeconds(3);
+        _nextTempRetryUtc = DateTime.UtcNow.AddSeconds(2);
+        WriteDebugLog("ResetComputer");
     }
 
     public void Dispose()
@@ -599,22 +699,6 @@ internal sealed class SystemStatsReader : IDisposable
     {
         lock (Shared._gate)
             Shared.ResetComputer();
-    }
-
-    private sealed class UpdateVisitor : IVisitor
-    {
-        public void VisitComputer(IComputer computer) => computer.Traverse(this);
-
-        public void VisitHardware(IHardware hardware)
-        {
-            hardware.Update();
-            foreach (var sub in hardware.SubHardware)
-                sub.Accept(this);
-        }
-
-        public void VisitSensor(ISensor sensor) { }
-
-        public void VisitParameter(IParameter parameter) { }
     }
 
     private static string FormatBytes(ulong bytes)
