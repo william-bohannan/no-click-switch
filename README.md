@@ -11,7 +11,7 @@ A minimal always-on-top Windows top bar that shows **one tab per open window**.
 
 ## Install
 
-No admin rights. Installs to `%LocalAppData%\NoClickSwitch`, enables auto-start for the current user, and launches the app. Self-contained — no .NET install required. Reinstalls keep your `settings.json`.
+No admin rights. Installs to `%LocalAppData%\NoClickSwitch`, enables auto-start for the current user, adds a **Start Menu** shortcut (so you can relaunch after a crash), and launches the app. Self-contained — no .NET install required. Reinstalls keep your `settings.json`.
 
 ### PowerShell (recommended)
 
@@ -70,8 +70,8 @@ If no release zip is available, the PowerShell installer falls back to building 
 - **Hotkeys**: Ctrl+Alt+1…9 and Ctrl+Alt+0 jump to tabs 1–10 (optional Win+1…0; shell may override)
 - **Multi-monitor**: **one bar per monitor by default** (windows on that display), or primary-only (all windows on one bar)
 - **Tray**: Show/Hide bar, Settings, Exit (closing the bar hides it when the tray icon is enabled)
-- **Install** (in-app): copies the app to `%LocalAppData%\NoClickSwitch` and adds **auto-start on login** (current user)
-- **Uninstall**: removes auto-start and installed files (shown only when installed)
+- **Install** (in-app): copies the app to `%LocalAppData%\NoClickSwitch`, adds **auto-start on login**, and a **Start Menu** shortcut (current user)
+- **Uninstall**: removes auto-start, Start Menu shortcut, and installed files (shown only when installed)
 - Explorer icon opens **File Explorer**; **Ctrl+click** opens elevated (UAC)
 - Terminal icon opens **Windows Terminal** (falls back to PowerShell / cmd); **Ctrl+click** opens elevated (UAC)
 - Windows logo opens the **Start** menu

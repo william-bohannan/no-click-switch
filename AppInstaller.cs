@@ -118,6 +118,8 @@ internal static class AppInstaller
         using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath)
             ?? throw new InvalidOperationException("Could not open HKCU Run key.");
         key.SetValue(AppName, $"\"{InstalledExePath}\"");
+
+        InstallStartMenuShortcut();
     }
 
     public static void Uninstall()
@@ -132,6 +134,8 @@ internal static class AppInstaller
         {
             // continue cleanup
         }
+
+        RemoveStartMenuShortcut();
 
         if (!Directory.Exists(InstallDirectory))
             return;
@@ -180,5 +184,75 @@ internal static class AppInstaller
             File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), overwrite: true);
         foreach (var dir in Directory.GetDirectories(source))
             CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
+    }
+
+    /// <summary>
+    /// Current-user Start Menu entry so the app can be relaunched after a crash.
+    /// </summary>
+    public static string StartMenuShortcutPath
+    {
+        get
+        {
+            var programs = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                "Programs");
+            return Path.Combine(programs, $"{DisplayName}.lnk");
+        }
+    }
+
+    public static void InstallStartMenuShortcut()
+    {
+        try
+        {
+            var lnk = StartMenuShortcutPath;
+            var dir = Path.GetDirectoryName(lnk);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            var shellType = Type.GetTypeFromProgID("WScript.Shell")
+                ?? throw new InvalidOperationException("WScript.Shell unavailable.");
+            dynamic shell = Activator.CreateInstance(shellType)
+                ?? throw new InvalidOperationException("Could not create WScript.Shell.");
+            var shortcut = shell.CreateShortcut(lnk);
+            shortcut.TargetPath = InstalledExePath;
+            shortcut.WorkingDirectory = InstallDirectory;
+            shortcut.WindowStyle = 1;
+            shortcut.Description = $"{DisplayName} ({ShortName})";
+            shortcut.IconLocation = $"{InstalledExePath},0";
+            shortcut.Save();
+        }
+        catch
+        {
+            // Best-effort — auto-start still works without a Start Menu icon.
+        }
+    }
+
+    public static void RemoveStartMenuShortcut()
+    {
+        try
+        {
+            var lnk = StartMenuShortcutPath;
+            if (File.Exists(lnk))
+                File.Delete(lnk);
+
+            // Older / alternate names.
+            var programs = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                "Programs");
+            foreach (var name in new[] { $"{AppName}.lnk", $"{ShortName}.lnk" })
+            {
+                var alt = Path.Combine(programs, name);
+                if (File.Exists(alt))
+                    File.Delete(alt);
+            }
+
+            var folder = Path.Combine(programs, DisplayName);
+            if (Directory.Exists(folder))
+                Directory.Delete(folder, recursive: true);
+        }
+        catch
+        {
+            // best-effort
+        }
     }
 }

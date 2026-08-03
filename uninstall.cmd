@@ -23,6 +23,13 @@ echo   Removing auto-start...
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v %APP% /f >NUL 2>&1
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v %LEGACY% /f >NUL 2>&1
 
+echo   Removing Start Menu shortcut...
+set "STARTMENU=%APPDATA%\Microsoft\Windows\Start Menu\Programs"
+del /f /q "%STARTMENU%\No Click Switch.lnk" >NUL 2>&1
+del /f /q "%STARTMENU%\NoClickSwitch.lnk" >NUL 2>&1
+del /f /q "%STARTMENU%\NCS.lnk" >NUL 2>&1
+if exist "%STARTMENU%\No Click Switch" rmdir /s /q "%STARTMENU%\No Click Switch" >NUL 2>&1
+
 if exist "%INSTALL%" (
   echo   Removing %INSTALL%
   rmdir /s /q "%INSTALL%" 2>NUL

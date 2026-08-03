@@ -107,6 +107,21 @@ if not exist "%EXE%" (
 echo   Configuring auto-start on login...
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v %APP% /t REG_SZ /d "\"%EXE%\"" /f >NUL
 
+echo   Adding Start Menu shortcut...
+set "STARTMENU=%APPDATA%\Microsoft\Windows\Start Menu\Programs"
+set "LNK=%STARTMENU%\%DISPLAY%.lnk"
+if not exist "%STARTMENU%" mkdir "%STARTMENU%" >NUL 2>&1
+rem Small VBScript so we don't require PowerShell for the .lnk
+> "%TEMP%\ncs-startmenu.vbs" echo Set sh = CreateObject("WScript.Shell")
+>> "%TEMP%\ncs-startmenu.vbs" echo Set sc = sh.CreateShortcut("%LNK%")
+>> "%TEMP%\ncs-startmenu.vbs" echo sc.TargetPath = "%EXE%"
+>> "%TEMP%\ncs-startmenu.vbs" echo sc.WorkingDirectory = "%INSTALL%"
+>> "%TEMP%\ncs-startmenu.vbs" echo sc.Description = "%DISPLAY% (NCS)"
+>> "%TEMP%\ncs-startmenu.vbs" echo sc.IconLocation = "%EXE%,0"
+>> "%TEMP%\ncs-startmenu.vbs" echo sc.Save
+cscript //nologo "%TEMP%\ncs-startmenu.vbs" >NUL 2>&1
+del /f /q "%TEMP%\ncs-startmenu.vbs" >NUL 2>&1
+
 echo   Starting %DISPLAY%...
 start "" "%EXE%"
 

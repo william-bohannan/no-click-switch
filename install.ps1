@@ -227,6 +227,31 @@ function Set-AutoStart {
     Write-Ok "Auto-start on login enabled (current user)"
 }
 
+function Install-StartMenuShortcut {
+    # Current-user Start Menu so you can relaunch after a crash (no admin).
+    $programs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    New-Item -ItemType Directory -Path $programs -Force | Out-Null
+    $lnkPath = Join-Path $programs "$DisplayName.lnk"
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $sc = $shell.CreateShortcut($lnkPath)
+        $sc.TargetPath = $ExePath
+        $sc.WorkingDirectory = $InstallDir
+        $sc.WindowStyle = 1
+        $sc.Description = "$DisplayName ($ShortName) — always-on-top window switcher"
+        $ico = Join-Path $InstallDir "$AppName.ico"
+        if (-not (Test-Path -LiteralPath $ico)) {
+            $ico = $ExePath
+        }
+        $sc.IconLocation = "$ico,0"
+        $sc.Save()
+        Write-Ok "Start Menu shortcut: $DisplayName"
+    }
+    catch {
+        Write-Info "Start Menu shortcut skipped: $($_.Exception.Message)"
+    }
+}
+
 function Remove-LegacyInstall {
     Get-Process -Name $LegacyAppName -ErrorAction SilentlyContinue | ForEach-Object {
         Write-Info "Stopping legacy $($_.ProcessName) (PID $($_.Id))..."
@@ -291,6 +316,9 @@ else {
 
 Write-Step "Configuring auto-start..."
 Set-AutoStart
+
+Write-Step "Adding Start Menu shortcut..."
+Install-StartMenuShortcut
 
 if (-not $NoStart) {
     Write-Step "Starting $DisplayName ($ShortName)..."

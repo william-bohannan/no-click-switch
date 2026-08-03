@@ -47,6 +47,24 @@ catch {
     # best-effort
 }
 
+# Remove Start Menu shortcut(s).
+$startMenuCandidates = @(
+    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$DisplayName.lnk"),
+    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$AppName.lnk"),
+    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$ShortName.lnk")
+)
+foreach ($lnk in $startMenuCandidates) {
+    if (Test-Path -LiteralPath $lnk) {
+        Remove-Item -LiteralPath $lnk -Force -ErrorAction SilentlyContinue
+        Write-Host "=> Removed Start Menu shortcut" -ForegroundColor Cyan
+    }
+}
+$startMenuFolder = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$DisplayName"
+if (Test-Path -LiteralPath $startMenuFolder) {
+    Remove-Item -LiteralPath $startMenuFolder -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "=> Removed Start Menu folder" -ForegroundColor Cyan
+}
+
 # Remove install folder.
 if (Test-Path -LiteralPath $InstallDir) {
     Write-Host "=> Removing $InstallDir" -ForegroundColor Cyan
