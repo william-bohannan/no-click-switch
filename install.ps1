@@ -4,34 +4,20 @@
   Install No Click Switch (NCS) for the current user (no admin).
 
 .DESCRIPTION
-  Downloads the latest release (or builds from source), installs to
+  Downloads the latest self-contained release, installs to
   %LocalAppData%\NoClickSwitch, registers auto-start on login, and launches the app.
-  Also removes a previous Switched Bar install if present.
-
-.NOTES
-  Prefer install.cmd when Windows Security flags PowerShell installers:
-    curl.exe -L -o "%TEMP%\ncs-install.cmd" https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.cmd
-    "%TEMP%\ncs-install.cmd"
-
-  Or download NoClickSwitch-win-x64.zip from GitHub Releases and extract to
-  %LocalAppData%\NoClickSwitch, then run NoClickSwitch.exe and use Install.
+  Preserves settings.json across reinstalls. Removes a previous Switched Bar install if present.
 
 .EXAMPLE
-  # Local script (safest PowerShell path — no irm|iex)
+  # One-liner (recommended)
+  irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex
+
+.EXAMPLE
+  # Local / pinned version
   .\install.ps1
-
-.EXAMPLE
-  # Download script to a file, then run (avoids irm|iex heuristic)
-  Invoke-WebRequest -Uri https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 -OutFile "$env:TEMP\ncs-install.ps1"
-  powershell -NoProfile -File "$env:TEMP\ncs-install.ps1"
-
-.EXAMPLE
-  # Install a specific release tag
-  .\install.ps1 -Version v1.1.4
-
-.EXAMPLE
-  # Install without launching
+  .\install.ps1 -Version v1.1.6
   .\install.ps1 -NoStart
+  .\install.ps1 -ForceBuild
 #>
 param(
     [string]$Version = "latest",
@@ -42,16 +28,25 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+# Older Windows PowerShell defaults can omit TLS 1.2.
+try {
+    [Net.ServicePointManager]::SecurityProtocol =
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+}
+catch { }
+
 $Repo = "william-bohannan/no-click-switch"
 $AppName = "NoClickSwitch"
 $ShortName = "NCS"
 $DisplayName = "No Click Switch"
 $InstallDir = Join-Path $env:LOCALAPPDATA $AppName
 $ExePath = Join-Path $InstallDir "$AppName.exe"
+$SettingsName = "settings.json"
 $RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $UserAgent = "NoClickSwitch-Installer"
 $LegacyAppName = "SwitchedBar"
 $LegacyInstallDir = Join-Path $env:LOCALAPPDATA $LegacyAppName
+$LatestZipUrl = "https://github.com/$Repo/releases/latest/download/NoClickSwitch-win-x64.zip"
 
 function Write-Step([string]$Message) {
     Write-Host ""
@@ -77,18 +72,21 @@ function Stop-AppProcesses {
 function Get-ReleaseAsset {
     param([string]$Tag)
 
-    $headers = @{ "User-Agent" = $UserAgent; "Accept" = "application/vnd.github+json" }
+    # Fast path: no GitHub API needed for "latest".
     if ($Tag -eq "latest") {
-        $uri = "https://api.github.com/repos/$Repo/releases/latest"
-    }
-    else {
-        $normalized = if ($Tag.StartsWith("v")) { $Tag } else { "v$Tag" }
-        $uri = "https://api.github.com/repos/$Repo/releases/tags/$normalized"
+        return [pscustomobject]@{
+            Tag         = "latest"
+            Name        = "NoClickSwitch-win-x64.zip"
+            DownloadUrl = $LatestZipUrl
+        }
     }
 
+    $headers = @{ "User-Agent" = $UserAgent; "Accept" = "application/vnd.github+json" }
+    $normalized = if ($Tag.StartsWith("v")) { $Tag } else { "v$Tag" }
+    $uri = "https://api.github.com/repos/$Repo/releases/tags/$normalized"
     $release = Invoke-RestMethod -Uri $uri -Headers $headers
     $asset = $release.assets |
-        Where-Object { $_.name -match '(?i)win-x64.*\.zip$|NoClickSwitch.*\.zip$' } |
+        Where-Object { $_.name -match '(?i)NoClickSwitch.*\.zip$|win-x64.*\.zip$' } |
         Select-Object -First 1
     if (-not $asset) {
         $asset = $release.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
@@ -104,10 +102,34 @@ function Get-ReleaseAsset {
     }
 }
 
+function Save-UserSettings {
+    $settingsPath = Join-Path $InstallDir $SettingsName
+    if (-not (Test-Path -LiteralPath $settingsPath)) {
+        return $null
+    }
+    $backup = Join-Path ([System.IO.Path]::GetTempPath()) ("ncs-settings-" + [guid]::NewGuid().ToString("N") + ".json")
+    Copy-Item -LiteralPath $settingsPath -Destination $backup -Force
+    Write-Info "Preserving existing $SettingsName"
+    return $backup
+}
+
+function Restore-UserSettings {
+    param([string]$BackupPath)
+    if (-not $BackupPath -or -not (Test-Path -LiteralPath $BackupPath)) {
+        return
+    }
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    Copy-Item -LiteralPath $BackupPath -Destination (Join-Path $InstallDir $SettingsName) -Force
+    Remove-Item -LiteralPath $BackupPath -Force -ErrorAction SilentlyContinue
+    Write-Ok "Restored $SettingsName"
+}
+
 function Install-FromZip {
     param([string]$ZipPath)
 
-    if (Test-Path $InstallDir) {
+    $settingsBackup = Save-UserSettings
+
+    if (Test-Path -LiteralPath $InstallDir) {
         Write-Info "Removing previous install at $InstallDir"
         Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -120,7 +142,7 @@ function Install-FromZip {
 
         # Support both flat zips and a single top-level folder.
         $source = $extractDir
-        $children = Get-ChildItem -LiteralPath $extractDir -Force
+        $children = @(Get-ChildItem -LiteralPath $extractDir -Force)
         if ($children.Count -eq 1 -and $children[0].PSIsContainer) {
             $source = $children[0].FullName
         }
@@ -130,6 +152,8 @@ function Install-FromZip {
     finally {
         Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
     }
+
+    Restore-UserSettings -BackupPath $settingsBackup
 
     if (-not (Test-Path -LiteralPath $ExePath)) {
         throw "Install failed: $ExePath not found after extract."
@@ -145,8 +169,12 @@ No GitHub release zip was found and the .NET SDK is not installed.
 Options:
   1) Install .NET 8 SDK from https://dotnet.microsoft.com/download/dotnet/8.0
   2) Wait for / use a published release, then re-run this script
+
+  irm https://raw.githubusercontent.com/$Repo/main/install.ps1 | iex
 "@
     }
+
+    $settingsBackup = Save-UserSettings
 
     $srcZip = Join-Path ([System.IO.Path]::GetTempPath()) "NoClickSwitch-src.zip"
     $srcDir = Join-Path ([System.IO.Path]::GetTempPath()) ("NoClickSwitch-src-" + [guid]::NewGuid().ToString("N"))
@@ -176,11 +204,13 @@ Options:
         throw "dotnet publish failed with exit code $LASTEXITCODE."
     }
 
-    if (Test-Path $InstallDir) {
+    if (Test-Path -LiteralPath $InstallDir) {
         Remove-Item -LiteralPath $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     Copy-Item -Path (Join-Path $publishDir "*") -Destination $InstallDir -Recurse -Force
+
+    Restore-UserSettings -BackupPath $settingsBackup
 
     Remove-Item -LiteralPath $srcZip -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $srcDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -198,7 +228,6 @@ function Set-AutoStart {
 }
 
 function Remove-LegacyInstall {
-    # Migrated from Switched Bar — clean old Run key + install folder if present.
     Get-Process -Name $LegacyAppName -ErrorAction SilentlyContinue | ForEach-Object {
         Write-Info "Stopping legacy $($_.ProcessName) (PID $($_.Id))..."
         Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
@@ -228,13 +257,19 @@ Remove-LegacyInstall
 $installedFrom = $null
 if (-not $ForceBuild) {
     try {
-        Write-Step "Fetching release metadata ($Version)..."
+        Write-Step "Resolving release ($Version)..."
         $asset = Get-ReleaseAsset -Tag $Version
-        Write-Ok "Found $($asset.Tag) — $($asset.Name)"
+        Write-Ok "Using $($asset.Name) ($($asset.Tag))"
 
         Write-Step "Downloading..."
         $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) "NoClickSwitch-install.zip"
         Invoke-WebRequest -Uri $asset.DownloadUrl -OutFile $zipPath -UseBasicParsing -Headers @{ "User-Agent" = $UserAgent }
+
+        # Basic sanity check (empty / HTML error page).
+        $zipItem = Get-Item -LiteralPath $zipPath
+        if ($zipItem.Length -lt 1MB) {
+            throw "Download looks too small ($($zipItem.Length) bytes). Release asset may be missing."
+        }
 
         Write-Step "Installing to $InstallDir"
         Install-FromZip -ZipPath $zipPath

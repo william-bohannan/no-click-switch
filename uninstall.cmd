@@ -41,5 +41,8 @@ if exist "%LEGACY_DIR%" (
 echo.
 echo   Uninstall complete.
 echo.
+echo   PowerShell one-liner next time:
+echo     irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/uninstall.ps1 ^| iex
+echo.
 endlocal
 exit /b 0

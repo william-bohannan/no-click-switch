@@ -4,9 +4,16 @@
   Uninstall No Click Switch (NCS) for the current user.
 
 .EXAMPLE
+  # One-liner (recommended)
   irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/uninstall.ps1 | iex
 #>
 $ErrorActionPreference = "Stop"
+
+try {
+    [Net.ServicePointManager]::SecurityProtocol =
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+}
+catch { }
 
 $Repo = "william-bohannan/no-click-switch"
 $AppName = "NoClickSwitch"

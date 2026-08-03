@@ -9,38 +9,35 @@ A minimal always-on-top Windows top bar that shows **one tab per open window**.
 | **Website** | https://noclickswitch.com *(coming soon)* |
 | **Install path** | `%LocalAppData%\NoClickSwitch` |
 
-## Install (Windows)
+## Install
 
-No admin rights. Installs to `%LocalAppData%\NoClickSwitch`, starts with Windows (current user), and launches the app.
+No admin rights. Installs to `%LocalAppData%\NoClickSwitch`, enables auto-start for the current user, and launches the app. Self-contained — no .NET install required. Reinstalls keep your `settings.json`.
 
-### Recommended: `install.cmd` (no PowerShell)
+### PowerShell (recommended)
 
-Avoids `irm | iex`, which Windows Defender often treats like malware:
+```powershell
+irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex
+```
+
+### Uninstall
+
+```powershell
+irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/uninstall.ps1 | iex
+```
+
+Or use **Uninstall** from the app’s ☰ menu.
+
+### Other options
+
+**Command Prompt** (no PowerShell):
 
 ```cmd
 curl.exe -L -o "%TEMP%\ncs-install.cmd" https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.cmd && "%TEMP%\ncs-install.cmd"
 ```
 
-Or download **NoClickSwitch-win-x64.zip** from [Releases](https://github.com/william-bohannan/no-click-switch/releases/latest), extract to `%LocalAppData%\NoClickSwitch`, run `NoClickSwitch.exe`, then **Install** from the ☰ menu.
+**Manual:** download **NoClickSwitch-win-x64.zip** from [Releases](https://github.com/william-bohannan/no-click-switch/releases/latest), extract to `%LocalAppData%\NoClickSwitch`, run `NoClickSwitch.exe`, then **Install** from the ☰ menu.
 
-### PowerShell (advanced / build-from-source)
-
-Prefer saving the script to a file (not piping into `iex`):
-
-```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 -OutFile "$env:TEMP\ncs-install.ps1"
-powershell -NoProfile -File "$env:TEMP\ncs-install.ps1"
-```
-
-The script downloads the latest **self-contained multi-file** release (no .NET install required). If no release is available, it falls back to building from source when the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) is present.
-
-### Uninstall
-
-```cmd
-curl.exe -L -o "%TEMP%\ncs-uninstall.cmd" https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/uninstall.cmd && "%TEMP%\ncs-uninstall.cmd"
-```
-
-Or **Uninstall** from the app’s ☰ menu.
+If no release zip is available, the PowerShell installer falls back to building from source when the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) is present.
 
 ## Behaviour
 
@@ -107,10 +104,10 @@ No Click Switch is a small **unsigned** open-source utility. It controls windows
 
 ### What we do to reduce flags (no cert required)
 
-- **No PowerShell for upgrades or Flameshot helpers** — local `.cmd` + `robocopy` / `winget` only
-- **No `irm | iex` in the recommended install path** — use `install.cmd` (curl + tar) or a manual zip extract
+- **No PowerShell for in-app upgrades or Flameshot helpers** — local `.cmd` + `robocopy` / `winget` only
 - **Multi-file** self-contained releases (not a single packed self-extracting exe)
 - Upgrades download the **official GitHub zip in-process** via HttpClient (no remote script)
+- If Defender blocks `irm | iex`, use **install.cmd** or a manual zip extract (see *Other options* above)
 
 Long-term reputation fix is a paid **code-signing certificate** (Authenticode), which we may add later.
 

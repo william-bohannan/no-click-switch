@@ -2023,9 +2023,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 "Upgrade failed.\n\n" +
                 $"{ex.Message}\n\n" +
                 "Manual install (if needed):\n" +
-                "1) Download NoClickSwitch-win-x64.zip from GitHub Releases\n" +
-                "2) Extract over %LocalAppData%\\NoClickSwitch\n" +
-                "   or run install.cmd from the repo (no PowerShell).\n\n" +
+                "  irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex\n" +
+                "or download NoClickSwitch-win-x64.zip from GitHub Releases and extract to\n" +
+                "%LocalAppData%\\NoClickSwitch.\n\n" +
                 "If Windows blocked the download, check Defender protection history " +
                 "and allow No Click Switch / the zip from github.com.",
                 AppInstaller.DisplayName,
