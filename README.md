@@ -68,7 +68,7 @@ If no release zip is available, the PowerShell installer falls back to building 
 - **Tab context menu**: Pin / Unpin, Minimize, Close
 - **Pinned** processes stay at the front of the strip (pin from the tab menu)
 - **Hotkeys**: Ctrl+Alt+1…9 and Ctrl+Alt+0 jump to tabs 1–10 (optional Win+1…0; shell may override)
-- **Multi-monitor**: primary-only bar (all windows) or one bar per monitor (windows on that display)
+- **Multi-monitor**: **one bar per monitor by default** (windows on that display), or primary-only (all windows on one bar)
 - **Tray**: Show/Hide bar, Settings, Exit (closing the bar hides it when the tray icon is enabled)
 - **Install** (in-app): copies the app to `%LocalAppData%\NoClickSwitch` and adds **auto-start on login** (current user)
 - **Uninstall**: removes auto-start and installed files (shown only when installed)

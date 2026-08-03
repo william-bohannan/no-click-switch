@@ -86,7 +86,7 @@ public sealed class AppSettings
     public List<string> PinnedProcesses { get; set; } = new();
 
     /// <summary>Primary only vs one bar per monitor.</summary>
-    public MonitorBarMode MonitorMode { get; set; } = MonitorBarMode.PrimaryOnly;
+    public MonitorBarMode MonitorMode { get; set; } = MonitorBarMode.AllMonitors;
 
     /// <summary>Show notify-icon in the system tray.</summary>
     public bool ShowTrayIcon { get; set; } = true;
