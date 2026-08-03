@@ -238,7 +238,7 @@ function Install-StartMenuShortcut {
         $sc.TargetPath = $ExePath
         $sc.WorkingDirectory = $InstallDir
         $sc.WindowStyle = 1
-        $sc.Description = "$DisplayName ($ShortName) — always-on-top window switcher"
+        $sc.Description = "$DisplayName ($ShortName) - always-on-top window switcher"
         $ico = Join-Path $InstallDir "$AppName.ico"
         if (-not (Test-Path -LiteralPath $ico)) {
             $ico = $ExePath
