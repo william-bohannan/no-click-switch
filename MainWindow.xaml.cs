@@ -40,7 +40,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _activeTabTimer;
     private readonly DispatcherTimer _hoverDelayTimer;
     private readonly DispatcherTimer _barHideTimer;
-    private readonly DispatcherTimer _appMenuHideTimer;
+    /// <summary>Polls cursor while the app menu is open (ContextMenu leave events are unreliable).</summary>
+    private readonly DispatcherTimer _appMenuPollTimer;
+    private DateTime? _appMenuPointerLeftUtc;
     // Shared across all bars — LibreHardwareMonitor must only Open() once per process.
     private readonly SystemStatsReader _stats = SystemStatsReader.Shared;
     private IntPtr _selfHwnd;
@@ -242,12 +244,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 CollapseBar();
         };
 
-        // Hamburger menu: close 3s after pointer leaves menu + button.
-        _appMenuHideTimer = new DispatcherTimer
+        // Hamburger menu: poll cursor; close after 3s away from menu + button.
+        // (ContextMenu MouseLeave often never fires when the pointer leaves the popup.)
+        _appMenuPollTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromSeconds(3),
+            Interval = TimeSpan.FromMilliseconds(200),
         };
-        _appMenuHideTimer.Tick += AppMenuHideTimer_Tick;
+        _appMenuPollTimer.Tick += AppMenuPollTimer_Tick;
 
         AppSettingsStore.Instance.Changed += (_, _) =>
             Dispatcher.Invoke(ApplySettings);
@@ -307,7 +310,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _activeTabTimer.Stop();
         _hoverDelayTimer.Stop();
         _barHideTimer.Stop();
-        _appMenuHideTimer.Stop();
+        _appMenuPollTimer.Stop();
         StopHeightAnimation();
         // Do not dispose shared stats here (other bars may still be sampling).
         _settingsWindow?.Close();
@@ -1946,10 +1949,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     /// </summary>
     private bool _suppressAppMenuOpen;
 
+    private const double AppMenuAutoHideSeconds = 3.0;
+
     private void MenuButton_MouseEnter(object sender, MouseEventArgs e)
     {
-        CancelAppMenuAutoHide();
-
         // Defer past the enter event — opening a ContextMenu synchronously on MouseEnter
         // re-enters layout/input and can NullRef with topmost windows.
         if (_appMenuOpen || MenuButton.ContextMenu?.IsOpen == true || _suppressAppMenuOpen)
@@ -1960,8 +1963,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void MenuButton_MouseLeave(object sender, MouseEventArgs e)
     {
-        if (_appMenuOpen || MenuButton.ContextMenu?.IsOpen == true)
-            ScheduleAppMenuAutoHide();
+        // Polling handles auto-hide; nothing required here.
     }
 
     private void MenuButton_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -2026,7 +2028,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             menu.VerticalOffset = 2;
             menu.IsOpen = true;
             _appMenuOpen = true;
-            CancelAppMenuAutoHide();
+            StartAppMenuPointerWatch();
         }
         catch
         {
@@ -2037,7 +2039,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void CloseAppMenu()
     {
-        CancelAppMenuAutoHide();
+        StopAppMenuPointerWatch();
         try
         {
             var menu = MenuButton?.ContextMenu ?? AppMenu;
@@ -2052,42 +2054,102 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _appMenuOpen = false;
     }
 
-    private void ScheduleAppMenuAutoHide()
+    private void StartAppMenuPointerWatch()
     {
-        if (!_appMenuOpen && MenuButton?.ContextMenu?.IsOpen != true)
+        _appMenuPointerLeftUtc = null;
+        _appMenuPollTimer.Stop();
+        _appMenuPollTimer.Start();
+    }
+
+    private void StopAppMenuPointerWatch()
+    {
+        _appMenuPollTimer.Stop();
+        _appMenuPointerLeftUtc = null;
+    }
+
+    private void AppMenuPollTimer_Tick(object? sender, EventArgs e)
+    {
+        var menu = MenuButton?.ContextMenu ?? AppMenu;
+        if (menu is null || !menu.IsOpen)
+        {
+            StopAppMenuPointerWatch();
+            _appMenuOpen = false;
             return;
+        }
 
-        _appMenuHideTimer.Stop();
-        _appMenuHideTimer.Interval = TimeSpan.FromSeconds(3);
-        _appMenuHideTimer.Start();
-    }
-
-    private void CancelAppMenuAutoHide()
-    {
-        _appMenuHideTimer.Stop();
-    }
-
-    private void AppMenuHideTimer_Tick(object? sender, EventArgs e)
-    {
-        _appMenuHideTimer.Stop();
-
-        // Still over the hamburger or the popup? Keep open and wait for another leave.
-        if (IsMouseOverAppMenuOrButton())
+        if (IsPointerOverAppMenuOrButton())
+        {
+            _appMenuPointerLeftUtc = null;
             return;
+        }
 
-        CloseAppMenu();
+        // Pointer is away from menu and hamburger — start / continue the 3s grace period.
+        _appMenuPointerLeftUtc ??= DateTime.UtcNow;
+        if ((DateTime.UtcNow - _appMenuPointerLeftUtc.Value).TotalSeconds >= AppMenuAutoHideSeconds)
+            CloseAppMenu();
     }
 
-    private bool IsMouseOverAppMenuOrButton()
+    /// <summary>
+    /// Screen-space hit test for the hamburger and the open ContextMenu popup.
+    /// IsMouseOver on ContextMenu is unreliable once the pointer leaves the popup.
+    /// </summary>
+    private bool IsPointerOverAppMenuOrButton()
     {
         try
         {
-            if (MenuButton?.IsMouseOver == true)
-                return true;
+            // Physical screen pixels (WinForms / Win32).
+            var sp = System.Windows.Forms.Control.MousePosition;
+            var screen = new Point(sp.X, sp.Y);
+
+            if (MenuButton is not null && MenuButton.IsVisible)
+            {
+                try
+                {
+                    var topLeft = MenuButton.PointToScreen(new Point(0, 0));
+                    var bottomRight = MenuButton.PointToScreen(
+                        new Point(MenuButton.ActualWidth, MenuButton.ActualHeight));
+                    var pad = 4.0;
+                    var btn = new Rect(
+                        Math.Min(topLeft.X, bottomRight.X) - pad,
+                        Math.Min(topLeft.Y, bottomRight.Y) - pad,
+                        Math.Abs(bottomRight.X - topLeft.X) + pad * 2,
+                        Math.Abs(bottomRight.Y - topLeft.Y) + pad * 2);
+                    if (btn.Contains(screen))
+                        return true;
+                }
+                catch
+                {
+                    // fall through
+                }
+            }
 
             var menu = MenuButton?.ContextMenu ?? AppMenu;
-            if (menu is { IsOpen: true, IsMouseOver: true })
-                return true;
+            if (menu is { IsOpen: true })
+            {
+                try
+                {
+                    // ContextMenu lives in its own visual tree / HwndSource.
+                    if (menu.ActualWidth > 0 && menu.ActualHeight > 0)
+                    {
+                        var topLeft = menu.PointToScreen(new Point(0, 0));
+                        var bottomRight = menu.PointToScreen(
+                            new Point(menu.ActualWidth, menu.ActualHeight));
+                        // Include a small gap so moving between button and menu doesn't start the clock.
+                        var pad = 8.0;
+                        var menuRect = new Rect(
+                            Math.Min(topLeft.X, bottomRight.X) - pad,
+                            Math.Min(topLeft.Y, bottomRight.Y) - pad,
+                            Math.Abs(bottomRight.X - topLeft.X) + pad * 2,
+                            Math.Abs(bottomRight.Y - topLeft.Y) + pad * 2);
+                        if (menuRect.Contains(screen))
+                            return true;
+                    }
+                }
+                catch
+                {
+                    // fall through
+                }
+            }
         }
         catch
         {
@@ -2098,15 +2160,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void AppMenu_MouseEnter(object sender, MouseEventArgs e)
-        => CancelAppMenuAutoHide();
+    {
+        _appMenuPointerLeftUtc = null;
+    }
 
     private void AppMenu_MouseLeave(object sender, MouseEventArgs e)
-        => ScheduleAppMenuAutoHide();
+    {
+        // Polling owns auto-hide; leave is only a hint.
+        _appMenuPointerLeftUtc ??= DateTime.UtcNow;
+    }
 
     private void AppMenu_Opened(object sender, RoutedEventArgs e)
     {
         _appMenuOpen = true;
-        CancelAppMenuAutoHide();
+        StartAppMenuPointerWatch();
         try
         {
             RefreshAppMenu();
@@ -2120,7 +2187,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void AppMenu_Closed(object sender, RoutedEventArgs e)
     {
         _appMenuOpen = false;
-        CancelAppMenuAutoHide();
+        StopAppMenuPointerWatch();
         // Clear suppress on the next input tick so a deliberate re-hover can open again.
         Dispatcher.BeginInvoke(() => { _suppressAppMenuOpen = false; }, DispatcherPriority.Input);
     }
