@@ -89,6 +89,7 @@
                     VerticalAlignment="Center"
                     Margin="0,0,2,0"
                     MouseEnter="MenuButton_MouseEnter"
+                    MouseLeave="MenuButton_MouseLeave"
                     PreviewMouseLeftButtonDown="MenuButton_PreviewMouseLeftButtonDown"
                     Click="MenuButton_Click"
                     ToolTipService.IsEnabled="False">
@@ -96,7 +97,9 @@
                 <Button.ContextMenu>
                     <ContextMenu x:Name="AppMenu"
                                  Opened="AppMenu_Opened"
-                                 Closed="AppMenu_Closed">
+                                 Closed="AppMenu_Closed"
+                                 MouseEnter="AppMenu_MouseEnter"
+                                 MouseLeave="AppMenu_MouseLeave">
                         <MenuItem x:Name="MenuSettings"
                                   Header="Settings"
                                   Click="MenuSettings_Click">

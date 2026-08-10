@@ -40,6 +40,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _activeTabTimer;
     private readonly DispatcherTimer _hoverDelayTimer;
     private readonly DispatcherTimer _barHideTimer;
+    private readonly DispatcherTimer _appMenuHideTimer;
     // Shared across all bars — LibreHardwareMonitor must only Open() once per process.
     private readonly SystemStatsReader _stats = SystemStatsReader.Shared;
     private IntPtr _selfHwnd;
@@ -241,6 +242,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 CollapseBar();
         };
 
+        // Hamburger menu: close 3s after pointer leaves menu + button.
+        _appMenuHideTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(3),
+        };
+        _appMenuHideTimer.Tick += AppMenuHideTimer_Tick;
+
         AppSettingsStore.Instance.Changed += (_, _) =>
             Dispatcher.Invoke(ApplySettings);
 
@@ -299,6 +307,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _activeTabTimer.Stop();
         _hoverDelayTimer.Stop();
         _barHideTimer.Stop();
+        _appMenuHideTimer.Stop();
         StopHeightAnimation();
         // Do not dispose shared stats here (other bars may still be sampling).
         _settingsWindow?.Close();
@@ -1939,6 +1948,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void MenuButton_MouseEnter(object sender, MouseEventArgs e)
     {
+        CancelAppMenuAutoHide();
+
         // Defer past the enter event — opening a ContextMenu synchronously on MouseEnter
         // re-enters layout/input and can NullRef with topmost windows.
         if (_appMenuOpen || MenuButton.ContextMenu?.IsOpen == true || _suppressAppMenuOpen)
@@ -1947,14 +1958,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.BeginInvoke(OpenAppMenu, DispatcherPriority.Input);
     }
 
+    private void MenuButton_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (_appMenuOpen || MenuButton.ContextMenu?.IsOpen == true)
+            ScheduleAppMenuAutoHide();
+    }
+
     private void MenuButton_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         // Toggle: click hamburger again while open → close (don't let Click re-open).
         var menu = MenuButton?.ContextMenu ?? AppMenu;
         if (menu is not null && (menu.IsOpen || _appMenuOpen))
         {
-            menu.IsOpen = false;
-            _appMenuOpen = false;
+            CloseAppMenu();
             _suppressAppMenuOpen = true;
             e.Handled = true;
         }
@@ -1979,8 +1995,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (menu.IsOpen || _appMenuOpen)
         {
-            menu.IsOpen = false;
-            _appMenuOpen = false;
+            CloseAppMenu();
             return;
         }
 
@@ -2011,6 +2026,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             menu.VerticalOffset = 2;
             menu.IsOpen = true;
             _appMenuOpen = true;
+            CancelAppMenuAutoHide();
         }
         catch
         {
@@ -2019,9 +2035,78 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void CloseAppMenu()
+    {
+        CancelAppMenuAutoHide();
+        try
+        {
+            var menu = MenuButton?.ContextMenu ?? AppMenu;
+            if (menu is not null)
+                menu.IsOpen = false;
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _appMenuOpen = false;
+    }
+
+    private void ScheduleAppMenuAutoHide()
+    {
+        if (!_appMenuOpen && MenuButton?.ContextMenu?.IsOpen != true)
+            return;
+
+        _appMenuHideTimer.Stop();
+        _appMenuHideTimer.Interval = TimeSpan.FromSeconds(3);
+        _appMenuHideTimer.Start();
+    }
+
+    private void CancelAppMenuAutoHide()
+    {
+        _appMenuHideTimer.Stop();
+    }
+
+    private void AppMenuHideTimer_Tick(object? sender, EventArgs e)
+    {
+        _appMenuHideTimer.Stop();
+
+        // Still over the hamburger or the popup? Keep open and wait for another leave.
+        if (IsMouseOverAppMenuOrButton())
+            return;
+
+        CloseAppMenu();
+    }
+
+    private bool IsMouseOverAppMenuOrButton()
+    {
+        try
+        {
+            if (MenuButton?.IsMouseOver == true)
+                return true;
+
+            var menu = MenuButton?.ContextMenu ?? AppMenu;
+            if (menu is { IsOpen: true, IsMouseOver: true })
+                return true;
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return false;
+    }
+
+    private void AppMenu_MouseEnter(object sender, MouseEventArgs e)
+        => CancelAppMenuAutoHide();
+
+    private void AppMenu_MouseLeave(object sender, MouseEventArgs e)
+        => ScheduleAppMenuAutoHide();
+
     private void AppMenu_Opened(object sender, RoutedEventArgs e)
     {
         _appMenuOpen = true;
+        CancelAppMenuAutoHide();
         try
         {
             RefreshAppMenu();
@@ -2035,6 +2120,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void AppMenu_Closed(object sender, RoutedEventArgs e)
     {
         _appMenuOpen = false;
+        CancelAppMenuAutoHide();
         // Clear suppress on the next input tick so a deliberate re-hover can open again.
         Dispatcher.BeginInvoke(() => { _suppressAppMenuOpen = false; }, DispatcherPriority.Input);
     }
