@@ -97,7 +97,10 @@ internal static class AppInstaller
         foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.TopDirectoryOnly))
         {
             var name = Path.GetFileName(file);
-            // Skip debug symbols noise if present; copy everything else needed to run.
+            // Never copy kernel drivers. Older builds extracted WinRing0 as *.sys
+            // and Defender quarantines it as VulnerableDriver:WinNT/Winring0.
+            if (name.EndsWith(".sys", StringComparison.OrdinalIgnoreCase))
+                continue;
             var dest = Path.Combine(InstallDirectory, name);
             File.Copy(file, dest, overwrite: true);
         }

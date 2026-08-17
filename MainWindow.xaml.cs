@@ -43,7 +43,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     /// <summary>Polls cursor while the app menu is open (ContextMenu leave events are unreliable).</summary>
     private readonly DispatcherTimer _appMenuPollTimer;
     private DateTime? _appMenuPointerLeftUtc;
-    // Shared across all bars — LibreHardwareMonitor must only Open() once per process.
+    // Shared across all bars — one temperature sampler (WMI / nvidia-smi, no kernel driver).
     private readonly SystemStatsReader _stats = SystemStatsReader.Shared;
     private IntPtr _selfHwnd;
     private IntPtr _lastAppForeground;

@@ -1,24 +1,27 @@
+using System.Diagnostics;
 using System.IO;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
-using LibreHardwareMonitor.Hardware;
 
 namespace NoClickSwitch;
 
 /// <summary>
 /// Samples CPU/MEM load, up to two fixed disks, and CPU/GPU temperatures.
-/// Use <see cref="Shared"/> so only one LibreHardwareMonitor <see cref="Computer"/> is opened.
-/// Safe for multi-monitor (multiple bars): sampling is locked and coalesced.
+/// Use <see cref="Shared"/> so only one sampler runs for every bar.
+///
+/// Temperatures are user-mode only (WMI / ACPI / nvidia-smi). We never extract
+/// or load WinRing0 — LibreHardwareMonitor did that as NoClickSwitch.sys and
+/// Microsoft Defender quarantines it as VulnerableDriver:WinNT/Winring0.
 /// </summary>
 internal sealed class SystemStatsReader : IDisposable
 {
-    /// <summary>Process-wide reader (multiple bars must not each Open() LHM).</summary>
+    /// <summary>Process-wide reader (multiple bars must not each open WMI / spawn nvidia-smi).</summary>
     public static SystemStatsReader Shared { get; } = new();
 
     private readonly object _gate = new();
-    /// <summary>Separate from load/disk so UI sampling never waits on LibreHardwareMonitor.</summary>
+    /// <summary>Separate from load/disk so UI sampling never waits on WMI or nvidia-smi.</summary>
     private readonly object _tempGate = new();
 
     private long _idlePrev;
@@ -26,10 +29,6 @@ internal sealed class SystemStatsReader : IDisposable
     private long _userPrev;
     private bool _cpuPrimed;
 
-    private Computer? _computer;
-    private bool _tempsOpenAttempted;
-    private int _tempsFailStreak;
-    private DateTime _nextTempRetryUtc = DateTime.MinValue;
     private DateTime _lastSampleUtc = DateTime.MinValue;
     private DateTime _lastTempSampleUtc = DateTime.MinValue;
     private DateTime _lastGoodTempUtc = DateTime.MinValue;
@@ -41,7 +40,13 @@ internal sealed class SystemStatsReader : IDisposable
     private string _lastDebugLine = "";
     private int _tempSampleBusy; // 0 = idle, 1 = background sample running
 
-    /// <summary>How often to poll LibreHardwareMonitor (expensive). Load/disk stay at Sample rate.</summary>
+    private string? _nvidiaSmiPath;
+    private bool _nvidiaSmiProbed;
+    private DateTime _nextNvidiaProbeUtc = DateTime.MinValue;
+    private DateTime _nextNvidiaReadUtc = DateTime.MinValue;
+    private float? _cachedNvidiaTempC;
+
+    /// <summary>How often to poll temperature sources (WMI can hitch). Load/disk stay at Sample rate.</summary>
     private static readonly TimeSpan TempSampleInterval = TimeSpan.FromSeconds(2.5);
 
     public int CpuPercent { get; private set; }
@@ -78,14 +83,14 @@ internal sealed class SystemStatsReader : IDisposable
             }, warnMs: 5);
         }
 
-        // LHM blocks 50–500ms — never run it on the UI thread.
+        // WMI / nvidia-smi can block — never run them on the UI thread.
         RequestTemperatureSampleAsync();
     }
 
     private void RequestTemperatureSampleAsync()
     {
         var now = DateTime.UtcNow;
-        if (_computer is not null && (now - _lastTempSampleUtc) < TempSampleInterval)
+        if ((now - _lastTempSampleUtc) < TempSampleInterval)
             return;
         if (Interlocked.CompareExchange(ref _tempSampleBusy, 1, 0) != 0)
             return;
@@ -209,69 +214,33 @@ internal sealed class SystemStatsReader : IDisposable
 
     private void SampleTemperatures()
     {
-        EnsureComputer();
+        TryDeleteLegacyWinRing0();
 
         float? cpu = null;
         float? gpu = null;
         string? cpuSource = null;
         string? gpuSource = null;
-        var hardwareCount = 0;
-        var sensorCount = 0;
 
-        if (_computer is not null)
+        var wmi = TryReadWmiTemps();
+        if (wmi.Cpu is not null)
         {
-            try
-            {
-                // Only update hardware that can expose temps (skip memory/network trees).
-                foreach (var hardware in _computer.Hardware)
-                {
-                    hardwareCount++;
-                    if (!IsTempRelevant(hardware.HardwareType))
-                        continue;
-                    UpdateHardwareTree(hardware);
-                }
-
-                var bag = new TempBag();
-                foreach (var hardware in _computer.Hardware)
-                {
-                    if (!IsTempRelevant(hardware.HardwareType))
-                        continue;
-                    sensorCount += CollectTemps(hardware, bag);
-                }
-
-                cpu = bag.PickCpu(out cpuSource);
-                gpu = bag.PickGpu(out gpuSource);
-
-                if (cpu is not null || gpu is not null)
-                    _tempsFailStreak = 0;
-                else
-                    _tempStatus = $"LHM open; hardware={hardwareCount} tempSensors={sensorCount}; no CPU match";
-            }
-            catch (Exception ex)
-            {
-                _tempStatus = "LHM update error: " + ex.GetType().Name + ": " + ex.Message;
-                _tempsFailStreak++;
-                // Only reset after sustained failure — thrashing Open/Close breaks the kernel driver.
-                if (_tempsFailStreak >= 30)
-                {
-                    _tempsFailStreak = 0;
-                    ResetComputer();
-                }
-            }
-        }
-        else
-        {
-            _tempStatus = "LHM not open (" + _tempStatus + ")";
+            cpu = wmi.Cpu;
+            cpuSource = wmi.CpuSource;
         }
 
-        // WMI thermal-zone fallback when LHM has no CPU reading.
-        if (cpu is null)
+        if (wmi.Gpu is not null)
         {
-            var wmi = TryReadWmiCpuTemp(out var wmiName);
-            if (wmi is not null)
+            gpu = wmi.Gpu;
+            gpuSource = wmi.GpuSource;
+        }
+
+        if (gpu is null)
+        {
+            var nv = TryReadNvidiaSmiTemp(out var nvSource);
+            if (nv is not null)
             {
-                cpu = wmi;
-                cpuSource = wmiName;
+                gpu = nv;
+                gpuSource = nvSource;
             }
         }
 
@@ -284,7 +253,7 @@ internal sealed class SystemStatsReader : IDisposable
         else if (_lastGoodCpuTempC is int held
                  && (DateTime.UtcNow - _lastGoodTempUtc).TotalSeconds < 45)
         {
-            // Hold last good reading briefly through driver glitches.
+            // Hold last good reading briefly through transient WMI misses.
             CpuTempC = held;
             cpuSource ??= "last good reading";
         }
@@ -297,6 +266,8 @@ internal sealed class SystemStatsReader : IDisposable
         {
             GpuTempC = (int)Math.Round(gpu.Value);
             _lastGoodGpuTempC = GpuTempC;
+            if (_lastGoodTempUtc == DateTime.MinValue)
+                _lastGoodTempUtc = DateTime.UtcNow;
         }
         else if (_lastGoodGpuTempC is int heldGpu
                  && (DateTime.UtcNow - _lastGoodTempUtc).TotalSeconds < 45)
@@ -319,48 +290,285 @@ internal sealed class SystemStatsReader : IDisposable
         {
             CpuTempToolTip =
                 "CPU temperature: unavailable\n" +
-                (_computer is null
-                    ? "LibreHardwareMonitor could not open (sensor driver).\n"
-                    : "No CPU package/core sensor found.\n") +
+                "Windows did not expose a thermal-zone reading.\n" +
                 _tempStatus + "\n" +
-                "If this persists, restart No Click Switch from the Start menu.";
+                "NCS no longer loads a kernel sensor driver (WinRing0),\n" +
+                "which Microsoft Defender blocks as a vulnerable driver.";
         }
 
         GpuTempToolTip = GpuTempC is int gt
             ? (string.IsNullOrEmpty(gpuSource)
                 ? $"GPU temperature: {gt}°C"
                 : $"GPU temperature: {gt}°C\nSource: {gpuSource}")
-            : "GPU temperature: unavailable (no discrete/iGPU sensor)";
-
-        if (CpuTempC is null && GpuTempC is null)
-        {
-            _tempsFailStreak++;
-            if (_tempsFailStreak >= 30)
-            {
-                _tempsFailStreak = 0;
-                ResetComputer();
-            }
-        }
+            : "GPU temperature: unavailable\n" +
+              "No thermal zone or nvidia-smi reading.";
 
         WriteDebugLog(
             $"cpu={CpuTempC?.ToString() ?? "null"} gpu={GpuTempC?.ToString() ?? "null"} " +
-            $"hw={hardwareCount} sensors={sensorCount} computer={_computer is not null} " +
             $"status={_tempStatus}");
     }
 
-    private static bool IsTempRelevant(HardwareType type)
-        => type is HardwareType.Cpu
-            or HardwareType.GpuNvidia
-            or HardwareType.GpuAmd
-            or HardwareType.GpuIntel
-            or HardwareType.Motherboard
-            or HardwareType.SuperIO;
+    private readonly record struct WmiTemps(float? Cpu, string? CpuSource, float? Gpu, string? GpuSource);
 
-    private static void UpdateHardwareTree(IHardware hardware)
+    private WmiTemps TryReadWmiTemps()
     {
-        hardware.Update();
-        foreach (var sub in hardware.SubHardware)
-            UpdateHardwareTree(sub);
+        float? cpu = null;
+        string? cpuSource = null;
+        float? gpu = null;
+        string? gpuSource = null;
+
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "root\\CIMV2",
+                "SELECT Name, Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation");
+            foreach (ManagementObject obj in searcher.Get())
+            {
+                try
+                {
+                    var name = obj["Name"]?.ToString() ?? "";
+                    if (obj["Temperature"] is not { } raw)
+                        continue;
+                    if (!TryNormalizeTempC(Convert.ToDouble(raw), out var c))
+                        continue;
+
+                    var looksGpu = LooksLikeGpuZone(name);
+                    var looksCpu = LooksLikeCpuZone(name);
+                    if (looksGpu)
+                    {
+                        if (gpu is null || c > gpu)
+                        {
+                            gpu = c;
+                            gpuSource = "WMI " + name;
+                        }
+                    }
+                    else if (looksCpu || cpu is null)
+                    {
+                        // Prefer named CPU zones; otherwise keep the hottest remaining zone as CPU.
+                        if (cpu is null || looksCpu || c > cpu)
+                        {
+                            cpu = c;
+                            cpuSource = "WMI " + (string.IsNullOrWhiteSpace(name) ? "ThermalZone" : name);
+                            if (looksCpu)
+                            {
+                                // keep scanning for GPU zones
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // next zone
+                }
+            }
+        }
+        catch
+        {
+            // class missing
+        }
+
+        if (cpu is null)
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    "root\\WMI",
+                    "SELECT CurrentTemperature, InstanceName FROM MSAcpi_ThermalZoneTemperature");
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    try
+                    {
+                        if (obj["CurrentTemperature"] is not { } raw)
+                            continue;
+                        var tenthsK = Convert.ToDouble(raw);
+                        if (!TryNormalizeTempC(tenthsK, out var c, tenthsKelvinHint: true))
+                            continue;
+                        var name = obj["InstanceName"]?.ToString() ?? "ThermalZone";
+                        if (LooksLikeGpuZone(name))
+                        {
+                            gpu ??= c;
+                            gpuSource ??= "ACPI " + name;
+                        }
+                        else
+                        {
+                            cpu = c;
+                            cpuSource = "ACPI " + name;
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        // next
+                    }
+                }
+            }
+            catch
+            {
+                // not supported
+            }
+        }
+
+        if (cpu is null && gpu is null)
+            _tempStatus = "No Windows thermal-zone reading";
+        else if (cpu is null)
+            _tempStatus = "WMI GPU only; no CPU thermal zone";
+
+        return new WmiTemps(cpu, cpuSource, gpu, gpuSource);
+    }
+
+    private static bool LooksLikeCpuZone(string name)
+        => name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("TZ00", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("TZ0", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("ACPI\\ThermalZone\\TZ", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Processor", StringComparison.OrdinalIgnoreCase);
+
+    private static bool LooksLikeGpuZone(string name)
+        => name.Contains("GPU", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("GeForce", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Radeon", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("Graphics", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Windows reports thermal-zone values either as °C or as tenths of a kelvin.
+    /// </summary>
+    private static bool TryNormalizeTempC(double raw, out float celsius, bool tenthsKelvinHint = false)
+    {
+        celsius = 0;
+        double c;
+        if (tenthsKelvinHint || raw > 200)
+            c = raw / 10.0 - 273.15;
+        else
+            c = raw;
+
+        if (c < 1 || c > 125)
+            return false;
+        celsius = (float)c;
+        return true;
+    }
+
+    private float? TryReadNvidiaSmiTemp(out string source)
+    {
+        source = "";
+        var exe = ResolveNvidiaSmiPath();
+        if (exe is null)
+            return null;
+
+        if (DateTime.UtcNow < _nextNvidiaReadUtc && _cachedNvidiaTempC is not null)
+        {
+            source = "nvidia-smi";
+            return _cachedNvidiaTempC;
+        }
+
+        try
+        {
+            using var proc = Process.Start(new ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = "--query-gpu=temperature.gpu --format=csv,noheader,nounits",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            });
+            if (proc is null)
+                return null;
+
+            if (!proc.WaitForExit(1500))
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { /* ignore */ }
+                return null;
+            }
+
+            var text = proc.StandardOutput.ReadToEnd();
+            if (proc.ExitCode != 0)
+                return null;
+
+            float? best = null;
+            foreach (var line in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!float.TryParse(line.Trim(), out var t))
+                    continue;
+                if (t < 1 || t > 125)
+                    continue;
+                if (best is null || t > best)
+                    best = t;
+            }
+
+            if (best is null)
+                return null;
+
+            _cachedNvidiaTempC = best;
+            _nextNvidiaReadUtc = DateTime.UtcNow.AddSeconds(10);
+            source = "nvidia-smi";
+            return best;
+        }
+        catch
+        {
+            _nvidiaSmiPath = null;
+            _cachedNvidiaTempC = null;
+            _nextNvidiaProbeUtc = DateTime.UtcNow.AddMinutes(10);
+            return null;
+        }
+    }
+
+    private string? ResolveNvidiaSmiPath()
+    {
+        if (_nvidiaSmiPath is not null && File.Exists(_nvidiaSmiPath))
+            return _nvidiaSmiPath;
+
+        if (_nvidiaSmiProbed && DateTime.UtcNow < _nextNvidiaProbeUtc)
+            return _nvidiaSmiPath;
+
+        _nvidiaSmiProbed = true;
+        _nextNvidiaProbeUtc = DateTime.UtcNow.AddMinutes(5);
+
+        var candidates = new[]
+        {
+            Path.Combine(Environment.SystemDirectory, "nvidia-smi.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"),
+        };
+
+        foreach (var path in candidates)
+        {
+            if (File.Exists(path))
+            {
+                _nvidiaSmiPath = path;
+                return path;
+            }
+        }
+
+        _nvidiaSmiPath = null;
+        return null;
+    }
+
+    /// <summary>
+    /// Older builds extracted WinRing0 next to the exe as NoClickSwitch.sys.
+    /// Delete leftovers so Defender does not keep rediscovering them.
+    /// Never recreate the file.
+    /// </summary>
+    private static void TryDeleteLegacyWinRing0()
+    {
+        foreach (var dir in new[] { AppContext.BaseDirectory, AppInstaller.InstallDirectory })
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(dir))
+                    continue;
+                var sys = Path.Combine(dir, "NoClickSwitch.sys");
+                if (File.Exists(sys))
+                    File.Delete(sys);
+            }
+            catch
+            {
+                // Defender may already have it locked or quarantined.
+            }
+        }
     }
 
     private void WriteDebugLog(string line)
@@ -371,7 +579,8 @@ internal sealed class SystemStatsReader : IDisposable
             var now = DateTime.UtcNow;
             var isError = line.Contains("fail", StringComparison.OrdinalIgnoreCase)
                           || line.Contains("error", StringComparison.OrdinalIgnoreCase)
-                          || line.Contains("null", StringComparison.OrdinalIgnoreCase);
+                          || line.Contains("null", StringComparison.OrdinalIgnoreCase)
+                          || line.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
             if (!isError
                 && line == _lastDebugLine
                 && (now - _lastDebugLogUtc).TotalSeconds < 30)
@@ -402,358 +611,15 @@ internal sealed class SystemStatsReader : IDisposable
         }
     }
 
-    private sealed class TempBag
-    {
-        public float? CpuPackage;
-        public string? CpuPackageName;
-        public float? CpuCoreMax;
-        public string? CpuCoreMaxName;
-        public float? CpuCoreAverage;
-        public string? CpuCoreAverageName;
-        public float CpuCoreSum;
-        public int CpuCoreCount;
-        public float? CpuAny;
-        public string? CpuAnyName;
-        public float? Gpu;
-        public string? GpuName;
-
-        public float? PickCpu(out string? source)
-        {
-            if (CpuPackage is float p)
-            {
-                source = CpuPackageName;
-                return p;
-            }
-
-            if (CpuCoreMax is float m)
-            {
-                source = CpuCoreMaxName;
-                return m;
-            }
-
-            if (CpuCoreAverage is float a)
-            {
-                source = CpuCoreAverageName;
-                return a;
-            }
-
-            if (CpuCoreCount > 0)
-            {
-                source = $"average of {CpuCoreCount} cores";
-                return CpuCoreSum / CpuCoreCount;
-            }
-
-            if (CpuAny is float any)
-            {
-                source = CpuAnyName;
-                return any;
-            }
-
-            source = null;
-            return null;
-        }
-
-        public float? PickGpu(out string? source)
-        {
-            source = GpuName;
-            return Gpu;
-        }
-    }
-
-    /// <returns>Number of temperature sensors seen under this hardware tree.</returns>
-    private static int CollectTemps(IHardware hardware, TempBag bag)
-    {
-        var count = 0;
-        foreach (var sub in hardware.SubHardware)
-            count += CollectTemps(sub, bag);
-
-        var type = hardware.HardwareType;
-        var isCpuHw = type == HardwareType.Cpu;
-        var isGpuHw = type is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel;
-        var isBoardHw = type is HardwareType.Motherboard or HardwareType.SuperIO;
-
-        foreach (var sensor in hardware.Sensors)
-        {
-            if (sensor.SensorType != SensorType.Temperature)
-                continue;
-
-            // Value is float?; read carefully (avoid pattern quirks).
-            var raw = sensor.Value;
-            if (raw is null)
-                continue;
-            var value = raw.Value;
-            if (float.IsNaN(value) || float.IsInfinity(value))
-                continue;
-            if (value < 1 || value > 125)
-                continue;
-
-            count++;
-            var name = sensor.Name ?? "";
-
-            // "Distance to TjMax" is remaining headroom, not a die temperature.
-            if (name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase)
-                || (name.Contains("TjMax", StringComparison.OrdinalIgnoreCase)
-                    && name.Contains("Distance", StringComparison.OrdinalIgnoreCase)))
-                continue;
-
-            if (isCpuHw || (isBoardHw && LooksLikeCpuSensor(name)))
-            {
-                if (IsPackageName(name))
-                {
-                    if (bag.CpuPackage is null || IsBetterPackageName(name, bag.CpuPackageName))
-                    {
-                        bag.CpuPackage = value;
-                        bag.CpuPackageName = $"{hardware.Name} / {name}";
-                    }
-                }
-                else if (name.Equals("Core Max", StringComparison.OrdinalIgnoreCase)
-                         || name.Equals("CPU Core Max", StringComparison.OrdinalIgnoreCase))
-                {
-                    bag.CpuCoreMax = value;
-                    bag.CpuCoreMaxName = $"{hardware.Name} / {name}";
-                }
-                else if (name.Contains("Core Average", StringComparison.OrdinalIgnoreCase)
-                         || name.Equals("CPU Core Average", StringComparison.OrdinalIgnoreCase))
-                {
-                    bag.CpuCoreAverage = value;
-                    bag.CpuCoreAverageName = $"{hardware.Name} / {name}";
-                }
-                else if (IsCpuCoreSensor(name))
-                {
-                    bag.CpuCoreSum += value;
-                    bag.CpuCoreCount++;
-                    if (bag.CpuAny is null || value > bag.CpuAny)
-                    {
-                        bag.CpuAny = value;
-                        bag.CpuAnyName = $"{hardware.Name} / {name}";
-                    }
-                }
-                else
-                {
-                    // Any other temp on the CPU device (die, Tctl, unnamed, ...).
-                    if (bag.CpuAny is null || value > bag.CpuAny)
-                    {
-                        bag.CpuAny = value;
-                        bag.CpuAnyName = $"{hardware.Name} / {name}";
-                    }
-                }
-            }
-            else if (isGpuHw)
-            {
-                var prefer = name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                             || name.Contains("GPU", StringComparison.OrdinalIgnoreCase)
-                             || name.Equals("Temperature", StringComparison.OrdinalIgnoreCase);
-                if (bag.Gpu is null || prefer)
-                {
-                    bag.Gpu = value;
-                    bag.GpuName = $"{hardware.Name} / {name}";
-                }
-            }
-        }
-
-        return count;
-    }
-
-    private static bool LooksLikeCpuSensor(string name)
-        => name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("CCD", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsPackageName(string name)
-        => name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("CCD", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("CPU", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("CPU Temperature", StringComparison.OrdinalIgnoreCase)
-           || (name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-               && !name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-               && !name.Contains("Distance", StringComparison.OrdinalIgnoreCase));
-
-    private static bool IsBetterPackageName(string candidate, string? current)
-    {
-        if (string.IsNullOrEmpty(current))
-            return true;
-        int Rank(string n) =>
-            n.Contains("Package", StringComparison.OrdinalIgnoreCase) ? 3
-            : n.Contains("Tctl", StringComparison.OrdinalIgnoreCase) || n.Contains("Tdie", StringComparison.OrdinalIgnoreCase) ? 2
-            : 1;
-        return Rank(candidate) >= Rank(current);
-    }
-
-    private static bool IsCpuCoreSensor(string name)
-        => name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-           && !name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-           && !name.Contains("Average", StringComparison.OrdinalIgnoreCase)
-           && !name.Contains("Max", StringComparison.OrdinalIgnoreCase)
-           && !name.Contains("Distance", StringComparison.OrdinalIgnoreCase);
-
-    private static float? TryReadWmiCpuTemp(out string source)
-    {
-        source = "";
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(
-                "root\\CIMV2",
-                "SELECT Name, Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation");
-            float? best = null;
-            string? bestName = null;
-            foreach (ManagementObject obj in searcher.Get())
-            {
-                try
-                {
-                    var name = obj["Name"]?.ToString() ?? "";
-                    if (obj["Temperature"] is not { } raw)
-                        continue;
-                    var t = Convert.ToSingle(raw);
-                    if (t < 1 || t > 125)
-                        continue;
-                    var prefer = name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-                                 || name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                                 || name.Contains("TZ00", StringComparison.OrdinalIgnoreCase);
-                    if (best is null || prefer)
-                    {
-                        best = t;
-                        bestName = name;
-                        if (prefer)
-                            break;
-                    }
-                }
-                catch
-                {
-                    // next zone
-                }
-            }
-
-            if (best is not null)
-            {
-                source = "WMI " + (bestName ?? "ThermalZone");
-                return best;
-            }
-        }
-        catch
-        {
-            // class missing
-        }
-
-        try
-        {
-            using var searcher = new ManagementObjectSearcher(
-                "root\\WMI",
-                "SELECT CurrentTemperature, InstanceName FROM MSAcpi_ThermalZoneTemperature");
-            foreach (ManagementObject obj in searcher.Get())
-            {
-                try
-                {
-                    if (obj["CurrentTemperature"] is not { } raw)
-                        continue;
-                    var tenthsK = Convert.ToDouble(raw);
-                    var c = (float)(tenthsK / 10.0 - 273.15);
-                    if (c < 1 || c > 125)
-                        continue;
-                    source = "ACPI " + (obj["InstanceName"]?.ToString() ?? "ThermalZone");
-                    return c;
-                }
-                catch
-                {
-                    // next
-                }
-            }
-        }
-        catch
-        {
-            // not supported
-        }
-
-        return null;
-    }
-
-    private void EnsureComputer()
-    {
-        if (_computer is not null)
-            return;
-
-        if (_tempsOpenAttempted && DateTime.UtcNow < _nextTempRetryUtc)
-            return;
-
-        _tempsOpenAttempted = true;
-        try
-        {
-            // Ensure driver sidecar is next to the executable (LHM loads process-name.sys).
-            try
-            {
-                var baseDir = AppContext.BaseDirectory;
-                WriteDebugLog($"EnsureComputer baseDir={baseDir} sys={File.Exists(Path.Combine(baseDir, "NoClickSwitch.sys"))}");
-            }
-            catch
-            {
-                // ignore
-            }
-
-            _computer = new Computer
-            {
-                IsCpuEnabled = true,
-                IsGpuEnabled = true,
-                IsMotherboardEnabled = true,
-                IsControllerEnabled = true,
-                IsMemoryEnabled = false,
-                IsNetworkEnabled = false,
-                IsStorageEnabled = false,
-                IsBatteryEnabled = false,
-                IsPsuEnabled = false,
-            };
-            _computer.Open();
-
-            // One warm-up pass on temp-relevant devices only.
-            foreach (var h in _computer.Hardware)
-            {
-                if (IsTempRelevant(h.HardwareType))
-                    UpdateHardwareTree(h);
-            }
-
-            _tempsFailStreak = 0;
-            _tempStatus = "LibreHardwareMonitor open OK; hardware=" + _computer.Hardware.Count;
-            WriteDebugLog(_tempStatus);
-        }
-        catch (Exception ex)
-        {
-            _computer = null;
-            _tempStatus = "LibreHardwareMonitor open failed: " + ex.GetType().Name + ": " + ex.Message;
-            _nextTempRetryUtc = DateTime.UtcNow.AddSeconds(10);
-            WriteDebugLog(_tempStatus);
-        }
-    }
-
-    private void ResetComputer()
-    {
-        try
-        {
-            _computer?.Close();
-        }
-        catch
-        {
-            // ignore
-        }
-
-        _computer = null;
-        _tempsOpenAttempted = false;
-        _nextTempRetryUtc = DateTime.UtcNow.AddSeconds(2);
-        WriteDebugLog("ResetComputer");
-    }
-
     public void Dispose()
     {
-        if (!ReferenceEquals(this, Shared))
-            ResetComputer();
+        // Shared lives for the process; nothing to close (no kernel driver).
     }
 
     /// <summary>Called once when the app exits.</summary>
     public static void ShutdownShared()
     {
-        lock (Shared._tempGate)
-            Shared.ResetComputer();
+        // No kernel driver / LHM Computer to close.
     }
 
     private static string FormatBytes(ulong bytes)
