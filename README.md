@@ -56,7 +56,7 @@ If no release zip is available, the PowerShell installer falls back to building 
 - Left: **menu (☰)**, **Start**, **File Explorer**, **Windows Terminal**
 - Right: compact stats (**CPU/MEM %**, **up to 2 disks %**, **CPU/GPU °C**), **auto-hide**, **clock**
 - Disks: first two fixed drives (system drive preferred); 2nd row only if present
-- Temps via Windows thermal APIs (WMI/ACPI) and **nvidia-smi** for NVIDIA GPUs (GPU row only if a sensor is found). No kernel driver.
+- Temps via **LibreHardwareMonitor + signed PawnIO** (desktop CPU package), Windows thermal APIs (many laptops), and **nvidia-smi** for NVIDIA GPUs. No WinRing0.
 - **Menu (☰)** (hover to open):
   - **Settings** → customization (left nav + right form)
   - **Upgrade to x.y.z** (only when a newer GitHub release exists) — downloads the GitHub zip in-app; a local `.cmd` + `robocopy` applies files (no PowerShell). Unsigned builds may still trigger SmartScreen; use **More info → Run anyway** if you trust the project.
@@ -85,7 +85,7 @@ If no release zip is available, the PowerShell installer falls back to building 
 
 No Click Switch is a small **unsigned** open-source utility. It controls windows (bring-to-front, hotkeys) and can download updates from **GitHub Releases**. Microsoft Defender’s machine-learning models sometimes flag that combination as a threat (names vary — e.g. “behavior”, “ClickFix”, “Commando”, “Wacatac”). That is a **false positive**, not a real trojan.
 
-**1.1.13 and earlier** also extracted LibreHardwareMonitor’s **WinRing0** driver as `NoClickSwitch.sys`. Defender correctly quarantines that file as `VulnerableDriver:WinNT/Winring0` (CVE-2020-14979). The app then re-extracted it every minute, which produced a toast even though the current-threat list stayed empty. **1.1.14+ does not ship or extract that driver.** Upgrade to stop the alerts.
+**1.1.13 and earlier** extracted LibreHardwareMonitor’s **WinRing0** driver as `NoClickSwitch.sys`. Defender correctly quarantines that as `VulnerableDriver:WinNT/Winring0` (CVE-2020-14979). **1.1.15+ never extracts WinRing0.** Desktop CPU package temperature uses the official signed **[PawnIO](https://pawnio.eu/)** driver instead (Settings → Stats → Install PawnIO). That is the same path Fan Control and LibreHardwareMonitor adopted. Upgrade to 1.1.15, then install PawnIO once (UAC).
 
 ### Allow the app (recommended)
 

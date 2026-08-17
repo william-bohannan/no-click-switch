@@ -158,6 +158,7 @@ public partial class SettingsWindow : Window
 
             FlameshotShowCheck.IsChecked = s.AddonFlameshotShowOnBar;
             RefreshFlameshotStatus();
+            RefreshPawnIoStatus();
         }
         finally
         {
@@ -223,6 +224,92 @@ public partial class SettingsWindow : Window
 
         if (tag == "Addons")
             RefreshFlameshotStatus();
+        if (tag == "Stats")
+            RefreshPawnIoStatus();
+    }
+
+    private void RefreshPawnIoStatus()
+    {
+        if (PawnIoStatusText is null || PawnIoInstallButton is null)
+            return;
+
+        var version = PawnIoSetup.TryGetInstalledVersion();
+        PawnIoStatusText.Text = version is not null
+            ? $"Status: PawnIO {version} installed — CPU temperature can use the signed driver."
+            : "Status: PawnIO not installed — CPU °C will stay blank on PCs without a Windows thermal zone.";
+        PawnIoInstallButton.Content = version is not null ? "Reinstall PawnIO" : "Install PawnIO";
+        PawnIoInstallButton.IsEnabled = true;
+    }
+
+    private async void PawnIoInstall_Click(object sender, RoutedEventArgs e)
+    {
+        var confirm = MessageBox.Show(
+            this,
+            "Install the official signed PawnIO driver?\n\n" +
+            "This is the Defender-safe replacement for WinRing0. " +
+            "Windows will ask for administrator approval.\n\n" +
+            "Source: " + PawnIoSetup.WebsiteUrl,
+            "Install PawnIO",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes)
+            return;
+
+        PawnIoInstallButton.IsEnabled = false;
+        PawnIoStatusText.Text = "Status: downloading official installer…";
+        try
+        {
+            var ok = await PawnIoSetup.StartOfficialInstallerAsync();
+            if (!ok)
+            {
+                MessageBox.Show(
+                    this,
+                    "Could not start the PawnIO installer.\n\n" +
+                    "Download it yourself from " + PawnIoSetup.WebsiteUrl,
+                    "Install PawnIO",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            MessageBox.Show(
+                this,
+                "The PawnIO installer is running.\n\n" +
+                "Finish the UAC prompt, then click Refresh on this page. " +
+                "NCS will start reading CPU temperature without restarting.",
+                "Install PawnIO",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                "PawnIO install failed:\n" + ex.Message + "\n\n" +
+                "Download it yourself from " + PawnIoSetup.WebsiteUrl,
+                "Install PawnIO",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            RefreshPawnIoStatus();
+        }
+    }
+
+    private void PawnIoRefresh_Click(object sender, RoutedEventArgs e)
+    {
+        SystemStatsReader.Shared.RetryHardwareMonitor();
+        RefreshPawnIoStatus();
+        if (StatusText is not null)
+            StatusText.Text = PawnIoSetup.IsInstalled
+                ? "PawnIO detected — temperature sampling will use it."
+                : "PawnIO still not found.";
+    }
+
+    private void PawnIoWebsite_Click(object sender, RoutedEventArgs e)
+    {
+        PawnIoSetup.OpenWebsite();
     }
 
     private static void SetPageVisible(UIElement? page, bool visible)

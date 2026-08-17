@@ -335,6 +335,16 @@
                         <CheckBox x:Name="StatTempCheck" Content="CPU / GPU temperature" Margin="0,0,0,6" Checked="Setting_Changed" Unchecked="Setting_Changed" />
                         <CheckBox x:Name="StatClockCheck" Content="Clock (time + date)" Margin="0,0,0,16" Checked="Setting_Changed" Unchecked="Setting_Changed" />
 
+                        <TextBlock Text="CPU temperature driver" FontWeight="SemiBold" Margin="0,8,0,6" />
+                        <TextBlock Text="Many desktop PCs do not expose CPU package temperature through Windows. NCS uses the official signed PawnIO driver — the same replacement Fan Control and LibreHardwareMonitor adopted after Defender blocked WinRing0. One administrator prompt, then CPU °C works."
+                                   FontSize="12" Foreground="#666" Margin="0,0,0,8" TextWrapping="Wrap" />
+                        <TextBlock x:Name="PawnIoStatusText" Text="Status: checking…" FontSize="12" Foreground="#444" Margin="0,0,0,8" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="PawnIoInstallButton" Content="Install PawnIO" Padding="12,6" Margin="0,0,8,0" Click="PawnIoInstall_Click" />
+                            <Button Content="Refresh" Padding="12,6" Margin="0,0,8,0" Click="PawnIoRefresh_Click" />
+                            <Button Content="Website" Padding="12,6" Click="PawnIoWebsite_Click" />
+                        </StackPanel>
+
                         <TextBlock Text="Order (Load / Disk / Temp)" FontWeight="SemiBold" Margin="0,0,0,8" />
                         <DockPanel LastChildFill="True">
                             <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0" VerticalAlignment="Top">

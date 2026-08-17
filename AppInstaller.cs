@@ -110,7 +110,7 @@ internal static class AppInstaller
         foreach (var dir in Directory.GetDirectories(sourceDir))
         {
             var name = Path.GetFileName(dir);
-            if (name is "Update" or "Addons")
+            if (name is "Update" or "Addons" or "Tools")
                 continue;
             CopyDirectory(dir, Path.Combine(InstallDirectory, name));
         }
