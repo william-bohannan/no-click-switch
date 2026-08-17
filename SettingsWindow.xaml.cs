@@ -157,6 +157,8 @@ public partial class SettingsWindow : Window
             TrayCheck.IsChecked = s.ShowTrayIcon;
 
             FlameshotShowCheck.IsChecked = s.AddonFlameshotShowOnBar;
+            if (PawnIoEnableCheck is not null)
+                PawnIoEnableCheck.IsChecked = s.AddonPawnIoEnabled;
             RefreshFlameshotStatus();
             RefreshPawnIoStatus();
         }
@@ -223,9 +225,10 @@ public partial class SettingsWindow : Window
         SetPageVisible(PageAddons, tag == "Addons");
 
         if (tag == "Addons")
+        {
             RefreshFlameshotStatus();
-        if (tag == "Stats")
             RefreshPawnIoStatus();
+        }
     }
 
     private void RefreshPawnIoStatus()
@@ -234,9 +237,13 @@ public partial class SettingsWindow : Window
             return;
 
         var version = PawnIoSetup.TryGetInstalledVersion();
-        PawnIoStatusText.Text = version is not null
-            ? $"Status: PawnIO {version} installed — CPU temperature can use the signed driver."
-            : "Status: PawnIO not installed — CPU °C will stay blank on PCs without a Windows thermal zone.";
+        var enabled = PawnIoEnableCheck?.IsChecked == true;
+        if (version is not null && enabled)
+            PawnIoStatusText.Text = $"Status: PawnIO {version} installed and enabled.";
+        else if (version is not null)
+            PawnIoStatusText.Text = $"Status: PawnIO {version} installed — enable the checkbox to use it.";
+        else
+            PawnIoStatusText.Text = "Status: Not installed. Optional — only needed for desktop CPU package temp.";
         PawnIoInstallButton.Content = version is not null ? "Reinstall PawnIO" : "Install PawnIO";
         PawnIoInstallButton.IsEnabled = true;
     }
@@ -272,11 +279,15 @@ public partial class SettingsWindow : Window
                 return;
             }
 
+            if (PawnIoEnableCheck is not null)
+                PawnIoEnableCheck.IsChecked = true;
+            PersistFromUi();
+
             MessageBox.Show(
                 this,
                 "The PawnIO installer is running.\n\n" +
-                "Finish the UAC prompt, then click Refresh on this page. " +
-                "NCS will start reading CPU temperature without restarting.",
+                "Finish the UAC prompt, then click Refresh status. " +
+                "The addon is already enabled — temperatures start once the driver is installed.",
                 "Install PawnIO",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -504,6 +515,7 @@ public partial class SettingsWindow : Window
                     : MonitorBarMode.PrimaryOnly,
                 ShowTrayIcon = TrayCheck.IsChecked == true,
                 AddonFlameshotShowOnBar = FlameshotShowCheck is null || FlameshotShowCheck.IsChecked == true,
+                AddonPawnIoEnabled = PawnIoEnableCheck?.IsChecked == true,
             };
 
             AppSettingsStore.Instance.Replace(settings);

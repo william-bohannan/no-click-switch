@@ -103,6 +103,12 @@ public sealed class AppSettings
     /// <summary>Show Flameshot icon on the bar when the app is installed.</summary>
     public bool AddonFlameshotShowOnBar { get; set; } = true;
 
+    /// <summary>
+    /// Use the signed PawnIO driver (via LibreHardwareMonitor) for CPU/GPU temps.
+    /// Off by default — the user opts in from Settings → Addons.
+    /// </summary>
+    public bool AddonPawnIoEnabled { get; set; } = false;
+
     public AppSettings Clone()
     {
         var json = JsonSerializer.Serialize(this);

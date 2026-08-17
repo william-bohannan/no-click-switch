@@ -335,16 +335,6 @@
                         <CheckBox x:Name="StatTempCheck" Content="CPU / GPU temperature" Margin="0,0,0,6" Checked="Setting_Changed" Unchecked="Setting_Changed" />
                         <CheckBox x:Name="StatClockCheck" Content="Clock (time + date)" Margin="0,0,0,16" Checked="Setting_Changed" Unchecked="Setting_Changed" />
 
-                        <TextBlock Text="CPU temperature driver" FontWeight="SemiBold" Margin="0,8,0,6" />
-                        <TextBlock Text="Many desktop PCs do not expose CPU package temperature through Windows. NCS uses the official signed PawnIO driver — the same replacement Fan Control and LibreHardwareMonitor adopted after Defender blocked WinRing0. One administrator prompt, then CPU °C works."
-                                   FontSize="12" Foreground="#666" Margin="0,0,0,8" TextWrapping="Wrap" />
-                        <TextBlock x:Name="PawnIoStatusText" Text="Status: checking…" FontSize="12" Foreground="#444" Margin="0,0,0,8" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal">
-                            <Button x:Name="PawnIoInstallButton" Content="Install PawnIO" Padding="12,6" Margin="0,0,8,0" Click="PawnIoInstall_Click" />
-                            <Button Content="Refresh" Padding="12,6" Margin="0,0,8,0" Click="PawnIoRefresh_Click" />
-                            <Button Content="Website" Padding="12,6" Click="PawnIoWebsite_Click" />
-                        </StackPanel>
-
                         <TextBlock Text="Order (Load / Disk / Temp)" FontWeight="SemiBold" Margin="0,0,0,8" />
                         <DockPanel LastChildFill="True">
                             <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0" VerticalAlignment="Top">
@@ -485,7 +475,7 @@
                     <!-- Addons -->
                     <StackPanel x:Name="PageAddons" Visibility="Collapsed">
                         <TextBlock Text="Addons" FontSize="16" FontWeight="SemiBold" Foreground="#1A1A1A" />
-                        <TextBlock Text="Optional tools that can appear on the bar next to Terminal when installed."
+                        <TextBlock Text="Optional extras. Nothing here is installed or enabled unless you choose it."
                                    FontSize="12" Foreground="#666" Margin="0,4,0,16" TextWrapping="Wrap" />
 
                         <!-- Flameshot card -->
@@ -544,6 +534,66 @@
                                             Click="FlameshotRefresh_Click" />
                                 </StackPanel>
                                 <TextBlock Text="Install / uninstall open a PowerShell window (winget or Chocolatey). When it finishes, click Refresh status."
+                                           FontSize="11"
+                                           Foreground="#888"
+                                           Margin="0,8,0,0"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- PawnIO card -->
+                        <Border BorderBrush="#D0D0D0"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Background="#FAFAFA"
+                                Padding="14,12"
+                                Margin="0,0,0,12">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock FontFamily="{StaticResource FluentIconFont}"
+                                               Text="&#xE9D9;"
+                                               FontSize="18"
+                                               Foreground="#333"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0" />
+                                    <TextBlock Text="PawnIO"
+                                               FontSize="14"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center"
+                                               Foreground="#1A1A1A" />
+                                </StackPanel>
+                                <TextBlock Text="Signed kernel driver for accurate CPU / GPU package temperatures on desktops that have no Windows thermal zone. This is the Defender-safe replacement for WinRing0 used by Fan Control and LibreHardwareMonitor. Off unless you install and enable it."
+                                           FontSize="12"
+                                           Foreground="#666"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,10" />
+                                <TextBlock x:Name="PawnIoStatusText"
+                                           Text="Status: …"
+                                           FontSize="12"
+                                           Foreground="#444"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,10" />
+                                <CheckBox x:Name="PawnIoEnableCheck"
+                                          Content="Use PawnIO for CPU / GPU temperatures when installed"
+                                          Margin="0,0,0,10"
+                                          Checked="Setting_Changed"
+                                          Unchecked="Setting_Changed" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="PawnIoInstallButton"
+                                            Content="Install PawnIO"
+                                            Padding="12,6"
+                                            Margin="0,0,8,0"
+                                            Click="PawnIoInstall_Click"
+                                            ToolTip="Downloads the official signed installer from pawnio.eu and starts it (UAC)" />
+                                    <Button Content="Refresh status"
+                                            Padding="12,6"
+                                            Margin="0,0,8,0"
+                                            Click="PawnIoRefresh_Click" />
+                                    <Button Content="Website"
+                                            Padding="12,6"
+                                            Click="PawnIoWebsite_Click" />
+                                </StackPanel>
+                                <TextBlock Text="Install asks for administrator approval. When it finishes, click Refresh status."
                                            FontSize="11"
                                            Foreground="#888"
                                            Margin="0,8,0,0"

@@ -328,12 +328,11 @@ internal sealed class SystemStatsReader : IDisposable
         {
             CpuTempToolTip =
                 "CPU temperature: unavailable\n" +
-                (PawnIoSetup.IsInstalled
-                    ? "PawnIO is installed but no CPU sensor was found.\n"
-                    : "This PC does not expose a Windows thermal zone.\n" +
-                      "Install PawnIO (signed driver — Settings → Stats)\n" +
-                      "to read the CPU package temperature safely.\n" +
-                      "We do not use WinRing0 (Defender blocks it).\n") +
+                (PawnIoSetup.IsEnabled
+                    ? "PawnIO is enabled but no CPU sensor was found.\n"
+                    : "No Windows thermal-zone reading.\n" +
+                      "For desktop package temp, enable the PawnIO addon\n" +
+                      "(Settings → Addons). We do not use WinRing0.\n") +
                 _tempStatus;
         }
 
@@ -359,9 +358,11 @@ internal sealed class SystemStatsReader : IDisposable
             return;
 
         _lhmOpenAttempted = true;
-        if (!PawnIoSetup.IsInstalled)
+        if (!PawnIoSetup.IsEnabled)
         {
-            _tempStatus = "PawnIO not installed";
+            _tempStatus = AppSettingsStore.Instance.Current.AddonPawnIoEnabled
+                ? "PawnIO addon on, driver not installed"
+                : "PawnIO addon off";
             _nextLhmRetryUtc = DateTime.UtcNow.AddSeconds(30);
             return;
         }

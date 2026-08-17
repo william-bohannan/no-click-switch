@@ -21,6 +21,10 @@ internal static class PawnIoSetup
 
     public static bool IsInstalled => TryGetInstalledVersion() is not null;
 
+    /// <summary>User opted in (Settings → Addons) and the signed driver is present.</summary>
+    public static bool IsEnabled =>
+        AppSettingsStore.Instance.Current.AddonPawnIoEnabled && IsInstalled;
+
     public static string? TryGetInstalledVersion()
     {
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
