@@ -56,7 +56,7 @@ If no release zip is available, the PowerShell installer falls back to building 
 - Left: **menu (☰)**, **Start**, **File Explorer**, **Windows Terminal**
 - Right: compact stats (**CPU/MEM %**, **up to 2 disks %**, **CPU/GPU °C**), **auto-hide**, **clock**
 - Disks: first two fixed drives (system drive preferred); 2nd row only if present
-- Temps via Windows thermal APIs (many laptops) and **nvidia-smi** for NVIDIA GPUs. Optional **PawnIO** addon (Settings → Addons) for desktop CPU package temp. No WinRing0.
+- Temps via Windows thermal APIs (many laptops) and **nvidia-smi** for NVIDIA GPUs. Optional **PawnIO** addon (Settings → Addons) for desktop CPU package temp — install the driver **and** run NCS as administrator (the addon can restart elevated and keep that for login). No WinRing0.
 - **Menu (☰)** (hover to open):
   - **Settings** → customization (left nav + right form)
   - **Upgrade to x.y.z** (only when a newer GitHub release exists) — downloads the GitHub zip in-app; a local `.cmd` + `robocopy` applies files (no PowerShell). Unsigned builds may still trigger SmartScreen; use **More info → Run anyway** if you trust the project.
@@ -64,7 +64,7 @@ If no release zip is available, the PowerShell installer falls back to building 
   - App name, version, **GitHub**, **Website**
   - **Close**
 - **Settings** (Customization): mode, theme, opacity/blur (Mica/Acrylic), hover delay, stats, tab width, bar auto-hide, exclude list, **keyboard**, **monitors / tray**, **addons**. Stored in `%LocalAppData%\NoClickSwitch\settings.json`
-- **Addons**: optional extras, off until you choose them. **Flameshot** — icon right of Terminal when installed. **PawnIO** — signed driver for desktop CPU/GPU package temperatures (Install + enable checkbox)
+- **Addons**: optional extras, off until you choose them. **Flameshot** — icon right of Terminal when installed. **PawnIO** — signed driver for desktop CPU/GPU package temperatures (Install + enable + **Restart as administrator**)
 - **Tab context menu**: Pin / Unpin, Minimize, Close
 - **Pinned** processes stay at the front of the strip (pin from the tab menu)
 - **Hotkeys**: Ctrl+Alt+1…9 and Ctrl+Alt+0 jump to tabs 1–10 (optional Win+1…0; shell may override)
@@ -85,7 +85,7 @@ If no release zip is available, the PowerShell installer falls back to building 
 
 No Click Switch is a small **unsigned** open-source utility. It controls windows (bring-to-front, hotkeys) and can download updates from **GitHub Releases**. Microsoft Defender’s machine-learning models sometimes flag that combination as a threat (names vary — e.g. “behavior”, “ClickFix”, “Commando”, “Wacatac”). That is a **false positive**, not a real trojan.
 
-**1.1.13 and earlier** extracted LibreHardwareMonitor’s **WinRing0** driver as `NoClickSwitch.sys`. Defender correctly quarantines that as `VulnerableDriver:WinNT/Winring0` (CVE-2020-14979). **1.1.15+ never extracts WinRing0.** Desktop CPU package temperature is an optional **[PawnIO](https://pawnio.eu/)** addon (Settings → Addons). Off unless you install and enable it.
+**1.1.13 and earlier** extracted LibreHardwareMonitor’s **WinRing0** driver as `NoClickSwitch.sys`. Defender correctly quarantines that as `VulnerableDriver:WinNT/Winring0` (CVE-2020-14979). **1.1.15+ never extracts WinRing0.** Desktop CPU package temperature is an optional **[PawnIO](https://pawnio.eu/)** addon (Settings → Addons). Off unless you install and enable it. The PawnIO device only accepts an **elevated** process — installing the driver while NCS stays a normal user leaves CPU temp at `--°`.
 
 ### Allow the app (recommended)
 

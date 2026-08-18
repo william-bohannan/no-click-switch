@@ -123,6 +123,11 @@ internal static class AppInstaller
         key.SetValue(AppName, $"\"{InstalledExePath}\"");
 
         InstallStartMenuShortcut();
+
+        // PawnIO needs an elevated process; swap Run-key start for a highest-privilege
+        // logon task when the addon is already on and this install is elevated.
+        if (AppSettingsStore.Instance.Current.AddonPawnIoEnabled && PawnIoSetup.IsProcessElevated())
+            SyncLogonStart(elevate: true);
     }
 
     public static void Uninstall()
@@ -137,6 +142,8 @@ internal static class AppInstaller
         {
             // continue cleanup
         }
+
+        TryRemoveElevatedLogonTask();
 
         RemoveStartMenuShortcut();
 
@@ -256,6 +263,170 @@ internal static class AppInstaller
         catch
         {
             // best-effort
+        }
+    }
+
+    /// <summary>
+    /// PawnIO only answers elevated processes. When the addon is on, replace the
+    /// HKCU Run key with a logon scheduled task that runs with highest privileges
+    /// so CPU temps survive reboot without a UAC prompt every time.
+    /// </summary>
+    public static void SyncLogonStart(bool elevate)
+    {
+        if (elevate)
+        {
+            if (!PawnIoSetup.IsProcessElevated())
+                return;
+            if (TryCreateElevatedLogonTask())
+                TryRemoveRunKey();
+            return;
+        }
+
+        TryRemoveElevatedLogonTask();
+        TrySetRunKey();
+    }
+
+    private const string LogonTaskName = AppName;
+
+    private static bool TryCreateElevatedLogonTask()
+    {
+        var exe = File.Exists(InstalledExePath)
+            ? InstalledExePath
+            : Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe))
+            return false;
+
+        try
+        {
+            var type = Type.GetTypeFromProgID("Schedule.Service")
+                ?? throw new InvalidOperationException("Schedule.Service unavailable.");
+            dynamic service = Activator.CreateInstance(type)
+                ?? throw new InvalidOperationException("Could not create Schedule.Service.");
+            service.Connect();
+            dynamic folder = service.GetFolder("\\");
+            dynamic def = service.NewTask(0);
+            def.RegistrationInfo.Description =
+                $"{DisplayName} elevated logon start (PawnIO CPU temperatures)";
+            def.Principal.RunLevel = 1; // TASK_RUNLEVEL_HIGHEST
+            def.Principal.LogonType = 3; // TASK_LOGON_INTERACTIVE_TOKEN
+            def.Settings.DisallowStartIfOnBatteries = false;
+            def.Settings.StopIfGoingOnBatteries = false;
+            def.Settings.AllowHardTerminate = false;
+            def.Settings.ExecutionTimeLimit = "PT0S";
+            def.Settings.MultipleInstances = 2; // IgnoreNew
+            def.Settings.StartWhenAvailable = true;
+            def.Settings.StopIfGoingOnBatteries = false;
+            dynamic trigger = def.Triggers.Create(9); // TASK_TRIGGER_LOGON
+            trigger.Enabled = true;
+            dynamic action = def.Actions.Create(0); // TASK_ACTION_EXEC
+            action.Path = exe;
+            action.WorkingDirectory = Path.GetDirectoryName(exe) ?? InstallDirectory;
+            folder.RegisterTaskDefinition(
+                LogonTaskName,
+                def,
+                6, // TASK_CREATE_OR_UPDATE
+                null,
+                null,
+                3); // TASK_LOGON_INTERACTIVE_TOKEN
+            return ElevatedLogonTaskExists();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryRemoveElevatedLogonTask()
+    {
+        if (!ElevatedLogonTaskExists())
+            return true;
+
+        if (RunSchtasks($"/Delete /TN \"{LogonTaskName}\" /F", waitMs: 10000) == 0)
+            return true;
+
+        if (PawnIoSetup.IsProcessElevated())
+            return !ElevatedLogonTaskExists();
+
+        // Unelevated process cannot delete a highest-privilege task.
+        try
+        {
+            var started = Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Delete /TN \"{LogonTaskName}\" /F",
+                UseShellExecute = true,
+                Verb = "runas",
+                CreateNoWindow = true,
+            });
+            if (started is null)
+                return false;
+            started.WaitForExit(15000);
+            return !ElevatedLogonTaskExists();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ElevatedLogonTaskExists()
+        => RunSchtasks($"/Query /TN \"{LogonTaskName}\"", waitMs: 8000) == 0;
+
+    private static void TrySetRunKey()
+    {
+        try
+        {
+            var exe = File.Exists(InstalledExePath) ? InstalledExePath : Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe))
+                return;
+            using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath);
+            key?.SetValue(AppName, $"\"{exe}\"");
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    private static void TryRemoveRunKey()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+            key?.DeleteValue(AppName, throwOnMissingValue: false);
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    private static int RunSchtasks(string arguments, int waitMs)
+    {
+        try
+        {
+            using var proc = Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            if (proc is null)
+                return -1;
+            if (!proc.WaitForExit(waitMs))
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { /* ignore */ }
+                return -1;
+            }
+
+            return proc.ExitCode;
+        }
+        catch
+        {
+            return -1;
         }
     }
 }

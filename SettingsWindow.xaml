@@ -574,10 +574,20 @@
                                            TextWrapping="Wrap"
                                            Margin="0,0,0,10" />
                                 <CheckBox x:Name="PawnIoEnableCheck"
-                                          Content="Use PawnIO for CPU / GPU temperatures when installed"
                                           Margin="0,0,0,10"
                                           Checked="Setting_Changed"
-                                          Unchecked="Setting_Changed" />
+                                          Unchecked="Setting_Changed">
+                                    <StackPanel>
+                                        <TextBlock Text="Use PawnIO for CPU / GPU temperatures when installed"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="#1A1A1A" />
+                                        <TextBlock Text="Requires elevation. Ticking this restarts No Click Switch as administrator (Windows will ask). Uncheck keeps this session elevated; the next login is normal again."
+                                                   FontSize="11"
+                                                   Foreground="#666"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </CheckBox>
                                 <StackPanel Orientation="Horizontal">
                                     <Button x:Name="PawnIoInstallButton"
                                             Content="Install PawnIO"
@@ -585,6 +595,12 @@
                                             Margin="0,0,8,0"
                                             Click="PawnIoInstall_Click"
                                             ToolTip="Downloads the official signed installer from pawnio.eu and starts it (UAC)" />
+                                    <Button x:Name="PawnIoRestartAdminButton"
+                                            Content="Restart as administrator"
+                                            Padding="12,6"
+                                            Margin="0,0,8,0"
+                                            Click="PawnIoRestartAdmin_Click"
+                                            ToolTip="Relaunch No Click Switch elevated so it can open the PawnIO driver" />
                                     <Button Content="Refresh status"
                                             Padding="12,6"
                                             Margin="0,0,8,0"
@@ -593,7 +609,7 @@
                                             Padding="12,6"
                                             Click="PawnIoWebsite_Click" />
                                 </StackPanel>
-                                <TextBlock Text="Install asks for administrator approval. When it finishes, click Refresh status."
+                                <TextBlock Text="Install the driver first if needed, then tick the box. The first elevated launch also registers login auto-start so temperatures survive reboot."
                                            FontSize="11"
                                            Foreground="#888"
                                            Margin="0,8,0,0"

@@ -47,6 +47,19 @@ catch {
     # best-effort
 }
 
+# Elevated PawnIO logon task (created when the addon runs as administrator).
+try {
+    $task = Get-ScheduledTask -TaskName $AppName -ErrorAction SilentlyContinue
+    if ($task) {
+        Unregister-ScheduledTask -TaskName $AppName -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Host "=> Removed elevated logon task" -ForegroundColor Cyan
+    }
+}
+catch {
+    # May need elevation to delete a highest-privilege task.
+    schtasks.exe /Delete /TN $AppName /F 2>$null | Out-Null
+}
+
 # Remove Start Menu shortcut(s).
 $startMenuCandidates = @(
     (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$DisplayName.lnk"),

@@ -226,6 +226,7 @@ internal sealed class SystemStatsReader : IDisposable
     {
         lock (_tempGate)
         {
+            PawnIoSetup.InvalidateDeviceProbe();
             _lhmOpenAttempted = false;
             _nextLhmRetryUtc = DateTime.MinValue;
             try { _computer?.Close(); } catch { /* ignore */ }
@@ -326,13 +327,16 @@ internal sealed class SystemStatsReader : IDisposable
         }
         else
         {
+            var blocked = PawnIoSetup.IsEnabled ? PawnIoSetup.DescribeBlockedReason() : null;
             CpuTempToolTip =
                 "CPU temperature: unavailable\n" +
-                (PawnIoSetup.IsEnabled
-                    ? "PawnIO is enabled but no CPU sensor was found.\n"
-                    : "No Windows thermal-zone reading.\n" +
-                      "For desktop package temp, enable the PawnIO addon\n" +
-                      "(Settings → Addons). We do not use WinRing0.\n") +
+                (blocked is not null
+                    ? blocked + "\n"
+                    : PawnIoSetup.IsEnabled
+                        ? "PawnIO is enabled but no CPU sensor was found.\n"
+                        : "No Windows thermal-zone reading.\n" +
+                          "For desktop package temp, enable the PawnIO addon\n" +
+                          "(Settings → Addons). We do not use WinRing0.\n") +
                 _tempStatus;
         }
 
@@ -364,6 +368,15 @@ internal sealed class SystemStatsReader : IDisposable
                 ? "PawnIO addon on, driver not installed"
                 : "PawnIO addon off";
             _nextLhmRetryUtc = DateTime.UtcNow.AddSeconds(30);
+            return;
+        }
+
+        if (!PawnIoSetup.CanOpenDevice())
+        {
+            _tempStatus = PawnIoSetup.DescribeBlockedReason()
+                          ?? "PawnIO device could not be opened";
+            _nextLhmRetryUtc = DateTime.UtcNow.AddSeconds(15);
+            WriteDebugLog(_tempStatus + $" elevated={PawnIoSetup.IsProcessElevated()}");
             return;
         }
 
@@ -734,7 +747,12 @@ internal sealed class SystemStatsReader : IDisposable
         }
 
         if (cpu is null && gpu is null)
-            _tempStatus = "No Windows thermal-zone reading";
+        {
+            // Do not clobber a more specific LHM / PawnIO status.
+            if (string.IsNullOrEmpty(_tempStatus)
+                || _tempStatus.StartsWith("CPU temperature", StringComparison.OrdinalIgnoreCase))
+                _tempStatus = "No Windows thermal-zone reading";
+        }
         else if (cpu is null)
             _tempStatus = "WMI GPU only; no CPU thermal zone";
 

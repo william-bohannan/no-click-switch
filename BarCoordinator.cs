@@ -30,6 +30,8 @@ internal sealed class BarCoordinator
 
         _lastMonitorMode = AppSettingsStore.Instance.Current.MonitorMode;
         _lastPawnIoEnabled = AppSettingsStore.Instance.Current.AddonPawnIoEnabled;
+        if (_lastPawnIoEnabled && PawnIoSetup.IsProcessElevated())
+            AppInstaller.SyncLogonStart(elevate: true);
 
         // Enable taskbar auto-hide once for the whole session (not per-bar Loaded/Closed).
         // Bar rebuilds used to Close() the owner and flip auto-hide off on multi-monitor.
@@ -180,6 +182,7 @@ internal sealed class BarCoordinator
             {
                 _lastPawnIoEnabled = s.AddonPawnIoEnabled;
                 SystemStatsReader.Shared.RetryHardwareMonitor();
+                AppInstaller.SyncLogonStart(elevate: s.AddonPawnIoEnabled && PawnIoSetup.IsProcessElevated());
             }
 
             if (s.MonitorMode != _lastMonitorMode)
