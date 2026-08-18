@@ -70,6 +70,7 @@ If no release zip is available, the PowerShell installer falls back to building 
 - **Hotkeys**: Ctrl+Alt+1…9 and Ctrl+Alt+0 jump to tabs 1–10 (optional Win+1…0; shell may override)
 - **Multi-monitor**: **one bar per monitor by default** (windows on that display), or primary-only (all windows on one bar)
 - **Tray**: Show/Hide bar, Settings, Exit (closing the bar hides it when the tray icon is enabled)
+- **One instance** per login session. A second launch shows the existing bars. An elevated start (PawnIO) replaces the running process instead of stacking another.
 - **Install** (in-app): copies the app to `%LocalAppData%\NoClickSwitch`, adds **auto-start on login**, and a **Start Menu** shortcut (current user)
 - **Uninstall**: removes auto-start, Start Menu shortcut, and installed files (shown only when installed)
 - Explorer icon opens **File Explorer**; **Ctrl+click** opens elevated (UAC)

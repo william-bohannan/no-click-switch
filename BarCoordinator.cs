@@ -63,6 +63,10 @@ internal sealed class BarCoordinator
 
     public void Shutdown()
     {
+        if (!_started)
+            return;
+        _started = false;
+
         AppSettingsStore.Instance.Changed -= OnSettingsChanged;
         SystemEventsMonitor.DisplaySettingsChanged -= OnDisplayChanged;
         _hotkeys?.Dispose();

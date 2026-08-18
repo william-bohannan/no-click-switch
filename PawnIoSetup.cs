@@ -120,6 +120,7 @@ internal static class PawnIoSetup
             var started = Process.Start(new ProcessStartInfo
             {
                 FileName = exe,
+                Arguments = SingleInstance.ReplaceArg,
                 UseShellExecute = true,
                 Verb = "runas",
                 WorkingDirectory = Path.GetDirectoryName(exe) ?? AppContext.BaseDirectory,

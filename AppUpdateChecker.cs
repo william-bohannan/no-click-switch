@@ -323,7 +323,7 @@ internal static class AppUpdateChecker
         const string vbs =
             "If WScript.Arguments.Count < 1 Then WScript.Quit 1\r\n" +
             "On Error Resume Next\r\n" +
-            "CreateObject(\"Shell.Application\").ShellExecute WScript.Arguments(0), \"\", \"\", \"runas\", 1\r\n" +
+            "CreateObject(\"Shell.Application\").ShellExecute WScript.Arguments(0), \"--replace\", \"\", \"runas\", 1\r\n" +
             "If Err.Number <> 0 Then WScript.Quit 1\r\n" +
             "WScript.Quit 0\r\n";
         await File.WriteAllTextAsync(elevateVbs, vbs, Encoding.ASCII, ct).ConfigureAwait(false);
