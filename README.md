@@ -59,7 +59,7 @@ If no release zip is available, the PowerShell installer falls back to building 
 - Temps via Windows thermal APIs (many laptops) and **nvidia-smi** for NVIDIA GPUs. Optional **PawnIO** addon (Settings → Addons) for desktop CPU package temp — install the driver **and** run NCS as administrator (the addon can restart elevated and keep that for login). No WinRing0.
 - **Menu (☰)** (hover to open):
   - **Settings** → customization (left nav + right form)
-  - **Upgrade to x.y.z** (only when a newer GitHub release exists) — downloads the GitHub zip in-app; a local `.cmd` + `robocopy` applies files (no PowerShell). Unsigned builds may still trigger SmartScreen; use **More info → Run anyway** if you trust the project.
+  - **Upgrade to x.y.z** (only when a newer GitHub release exists) — downloads the GitHub zip in-app; a local `.cmd` + `robocopy` applies files (no PowerShell). If the PawnIO addon is on, the helper restarts elevated (logon task, not HKCU Run). Unsigned builds may still trigger SmartScreen; use **More info → Run anyway** if you trust the project.
   - **Install** / **Uninstall**
   - App name, version, **GitHub**, **Website**
   - **Close**

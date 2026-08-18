@@ -252,6 +252,7 @@ internal static class AppUpdateChecker
         var installDir = AppInstaller.InstallDirectory;
         var installedExe = AppInstaller.InstalledExePath;
         var pid = Environment.ProcessId;
+        var elevate = AppSettingsStore.Instance.Current.AddonPawnIoEnabled;
 
         progress?.Report("Starting local update helper…");
 
@@ -269,6 +270,8 @@ internal static class AppUpdateChecker
         cmd.AppendLine($"set \"SOURCE={SanitizeCmdPath(sourceDir)}\"");
         cmd.AppendLine($"set \"DEST={SanitizeCmdPath(installDir)}\"");
         cmd.AppendLine($"set \"EXE={SanitizeCmdPath(installedExe)}\"");
+        cmd.AppendLine($"set \"ELEVATE={(elevate ? "1" : "0")}\"");
+        cmd.AppendLine($"set \"TASK={AppInstaller.AppName}\"");
         cmd.AppendLine("echo   Waiting for the old process to exit...");
         cmd.AppendLine("set /a _tries=0");
         cmd.AppendLine(":wait_loop");
@@ -294,13 +297,36 @@ internal static class AppUpdateChecker
         cmd.AppendLine("  pause");
         cmd.AppendLine("  exit /b 1");
         cmd.AppendLine(")");
-        cmd.AppendLine("rem Auto-start on login (current user only)");
+        cmd.AppendLine("if \"%ELEVATE%\"==\"1\" goto start_elevated");
+        cmd.AppendLine("rem Auto-start on login (current user only) — unelevated session");
         cmd.AppendLine("reg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v NoClickSwitch /t REG_SZ /d \"\\\"%EXE%\\\"\" /f >NUL");
         cmd.AppendLine("echo   Starting No Click Switch...");
         cmd.AppendLine("start \"\" \"%EXE%\"");
+        cmd.AppendLine("goto start_done");
+        cmd.AppendLine(":start_elevated");
+        cmd.AppendLine("rem PawnIO needs elevation. Prefer the existing highest-privilege");
+        cmd.AppendLine("rem logon task (no extra UAC). Do not write HKCU Run — that would");
+        cmd.AppendLine("rem start a second, unelevated instance at login.");
+        cmd.AppendLine("reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v NoClickSwitch /f >NUL 2>&1");
+        cmd.AppendLine("echo   Starting No Click Switch (elevated, PawnIO)...");
+        cmd.AppendLine("schtasks /Run /TN \"%TASK%\" >NUL 2>&1");
+        cmd.AppendLine("if not errorlevel 1 goto start_done");
+        cmd.AppendLine("echo   Logon task missing — requesting administrator approval...");
+        cmd.AppendLine("cscript //nologo \"%~dp0Start-NoClickSwitchElevated.vbs\" \"%EXE%\"");
+        cmd.AppendLine("if errorlevel 1 start \"\" \"%EXE%\"");
+        cmd.AppendLine(":start_done");
         cmd.AppendLine("echo   Update complete.");
         cmd.AppendLine("timeout /t 2 /nobreak >NUL");
         cmd.AppendLine("endlocal");
+
+        var elevateVbs = Path.Combine(tempRoot, "Start-NoClickSwitchElevated.vbs");
+        const string vbs =
+            "If WScript.Arguments.Count < 1 Then WScript.Quit 1\r\n" +
+            "On Error Resume Next\r\n" +
+            "CreateObject(\"Shell.Application\").ShellExecute WScript.Arguments(0), \"\", \"\", \"runas\", 1\r\n" +
+            "If Err.Number <> 0 Then WScript.Quit 1\r\n" +
+            "WScript.Quit 0\r\n";
+        await File.WriteAllTextAsync(elevateVbs, vbs, Encoding.ASCII, ct).ConfigureAwait(false);
 
         await File.WriteAllTextAsync(applyCmd, cmd.ToString(), Encoding.ASCII, ct).ConfigureAwait(false);
 
