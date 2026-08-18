@@ -254,6 +254,9 @@ internal static class AppUpdateChecker
         var pid = Environment.ProcessId;
         var elevate = AppSettingsStore.Instance.Current.AddonPawnIoEnabled;
 
+        progress?.Report("Stopping other No Click Switch instances…");
+        StopOtherInstances();
+
         progress?.Report("Starting local update helper…");
 
         // Local batch only — no PowerShell, no network, no encoded commands.
@@ -272,21 +275,33 @@ internal static class AppUpdateChecker
         cmd.AppendLine($"set \"EXE={SanitizeCmdPath(installedExe)}\"");
         cmd.AppendLine($"set \"ELEVATE={(elevate ? "1" : "0")}\"");
         cmd.AppendLine($"set \"TASK={AppInstaller.AppName}\"");
-        cmd.AppendLine("echo   Waiting for the old process to exit...");
+        cmd.AppendLine("echo   Waiting for No Click Switch to exit...");
         cmd.AppendLine("set /a _tries=0");
-        cmd.AppendLine(":wait_loop");
+        cmd.AppendLine(":wait_pid");
         cmd.AppendLine("set /a _tries+=1");
-        cmd.AppendLine("if %_tries% GTR 90 goto wait_done");
+        cmd.AppendLine("if %_tries% GTR 45 goto stop_all");
         cmd.AppendLine("tasklist /FI \"PID eq %PID_WAIT%\" 2>NUL | findstr /I /C:\"%PID_WAIT%\" >NUL");
+        cmd.AppendLine("if errorlevel 1 goto stop_all");
+        cmd.AppendLine("timeout /t 1 /nobreak >NUL");
+        cmd.AppendLine("goto wait_pid");
+        cmd.AppendLine(":stop_all");
+        cmd.AppendLine("echo   Stopping any leftover No Click Switch processes...");
+        cmd.AppendLine("taskkill /IM NoClickSwitch.exe /F >NUL 2>&1");
+        cmd.AppendLine("set /a _tries=0");
+        cmd.AppendLine(":wait_all");
+        cmd.AppendLine("set /a _tries+=1");
+        cmd.AppendLine("if %_tries% GTR 20 goto wait_done");
+        cmd.AppendLine("tasklist /FI \"IMAGENAME eq NoClickSwitch.exe\" 2>NUL | findstr /I /C:\"NoClickSwitch.exe\" >NUL");
         cmd.AppendLine("if errorlevel 1 goto wait_done");
+        cmd.AppendLine("taskkill /IM NoClickSwitch.exe /F >NUL 2>&1");
         cmd.AppendLine("timeout /t 1 /nobreak >NUL");
-        cmd.AppendLine("goto wait_loop");
+        cmd.AppendLine("goto wait_all");
         cmd.AppendLine(":wait_done");
-        cmd.AppendLine("timeout /t 1 /nobreak >NUL");
+        cmd.AppendLine("timeout /t 2 /nobreak >NUL");
         cmd.AppendLine("echo   Installing to %DEST%");
         cmd.AppendLine("if not exist \"%DEST%\" mkdir \"%DEST%\"");
-        // robocopy: exit codes 0-7 mean success (files copied / extra files / etc.)
-        cmd.AppendLine("robocopy \"%SOURCE%\" \"%DEST%\" /E /IS /IT /R:3 /W:1 /NFL /NDL /NJH /NJS /XD Update");
+        // robocopy: exit codes 0-7 mean success (files copied / extra files / extra dirs / etc.)
+        cmd.AppendLine("robocopy \"%SOURCE%\" \"%DEST%\" /E /IS /IT /R:12 /W:2 /NFL /NDL /NJH /NJS /XD Update");
         cmd.AppendLine("if errorlevel 8 (");
         cmd.AppendLine("  echo   Update failed: robocopy error %ERRORLEVEL%");
         cmd.AppendLine("  pause");
@@ -351,6 +366,28 @@ internal static class AppUpdateChecker
 
             System.Windows.Application.Current.Shutdown();
         });
+    }
+
+    private static void StopOtherInstances()
+    {
+        var me = Environment.ProcessId;
+        foreach (var p in Process.GetProcessesByName(AppInstaller.AppName))
+        {
+            try
+            {
+                if (p.Id == me)
+                    continue;
+                p.Kill(entireProcessTree: false);
+            }
+            catch
+            {
+                // leftover may still be killed by the helper
+            }
+            finally
+            {
+                p.Dispose();
+            }
+        }
     }
 
     /// <summary>Strip characters that break <c>set "VAR=…"</c> batch lines.</summary>
