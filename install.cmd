@@ -109,7 +109,7 @@ reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v %APP% /t REG_SZ 
 
 echo   Adding Start Menu shortcut...
 set "STARTMENU=%APPDATA%\Microsoft\Windows\Start Menu\Programs"
-set "LNK=%STARTMENU%\%DISPLAY%.lnk"
+set "LNK=%STARTMENU%\%DISPLAY% (NCS).lnk"
 if not exist "%STARTMENU%" mkdir "%STARTMENU%" >NUL 2>&1
 rem Small VBScript so we don't require PowerShell for the .lnk
 > "%TEMP%\ncs-startmenu.vbs" echo Set sh = CreateObject("WScript.Shell")
@@ -121,6 +121,27 @@ rem Small VBScript so we don't require PowerShell for the .lnk
 >> "%TEMP%\ncs-startmenu.vbs" echo sc.Save
 cscript //nologo "%TEMP%\ncs-startmenu.vbs" >NUL 2>&1
 del /f /q "%TEMP%\ncs-startmenu.vbs" >NUL 2>&1
+del /f /q "%STARTMENU%\%DISPLAY%.lnk" >NUL 2>&1
+del /f /q "%STARTMENU%\NCS.lnk" >NUL 2>&1
+del /f /q "%STARTMENU%\%APP%.lnk" >NUL 2>&1
+
+echo   Registering app for Start Search...
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v DisplayName /t REG_SZ /d "%DISPLAY%" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v Publisher /t REG_SZ /d "william-bohannan" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v InstallLocation /t REG_SZ /d "%INSTALL%" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v DisplayIcon /t REG_SZ /d "%EXE%,0" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v UninstallString /t REG_SZ /d "\"%EXE%\" --uninstall" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v QuietUninstallString /t REG_SZ /d "\"%EXE%\" --uninstall" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v HelpLink /t REG_SZ /d "https://github.com/%REPO%" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v URLInfoAbout /t REG_SZ /d "https://noclickswitch.com" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v NoModify /t REG_DWORD /d 1 /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /v NoRepair /t REG_DWORD /d 1 /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\%APP%.exe" /ve /t REG_SZ /d "%EXE%" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\%APP%.exe" /v Path /t REG_SZ /d "%INSTALL%" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\ncs.exe" /ve /t REG_SZ /d "%EXE%" /f >NUL
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\ncs.exe" /v Path /t REG_SZ /d "%INSTALL%" /f >NUL
+reg add "HKCU\Software\Classes\Applications\%APP%.exe" /v FriendlyAppName /t REG_SZ /d "%DISPLAY%" /f >NUL
+reg add "HKCU\Software\Classes\Applications\%APP%.exe" /v AppUserModelID /t REG_SZ /d "william-bohannan.NoClickSwitch" /f >NUL
 
 echo   Starting %DISPLAY%...
 start "" "%EXE%"

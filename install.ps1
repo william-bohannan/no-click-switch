@@ -229,9 +229,12 @@ function Set-AutoStart {
 
 function Install-StartMenuShortcut {
     # Current-user Start Menu so you can relaunch after a crash (no admin).
+    # Filename includes NCS so Start Search matches both "No Click Switch" and "ncs".
     $programs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
     New-Item -ItemType Directory -Path $programs -Force | Out-Null
-    $lnkPath = Join-Path $programs "$DisplayName.lnk"
+    $appId = "william-bohannan.NoClickSwitch"
+    $shortcutName = "$DisplayName ($ShortName)"
+    $lnkPath = Join-Path $programs "$shortcutName.lnk"
     try {
         $shell = New-Object -ComObject WScript.Shell
         $sc = $shell.CreateShortcut($lnkPath)
@@ -245,11 +248,131 @@ function Install-StartMenuShortcut {
         }
         $sc.IconLocation = "$ico,0"
         $sc.Save()
-        Write-Ok "Start Menu shortcut: $DisplayName"
+        Set-ShortcutAppUserModelId -LnkPath $lnkPath -AppId $appId -DisplayName $shortcutName
+        foreach ($stale in @("$DisplayName.lnk", "$ShortName.lnk", "$AppName.lnk")) {
+            $old = Join-Path $programs $stale
+            if ((Test-Path -LiteralPath $old) -and ($old -ne $lnkPath)) {
+                Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Write-Ok "Start Menu shortcut: $shortcutName"
     }
     catch {
         Write-Info "Start Menu shortcut skipped: $($_.Exception.Message)"
     }
+}
+
+function Set-ShortcutAppUserModelId {
+    param([string]$LnkPath, [string]$AppId, [string]$DisplayName)
+    # WScript.Shell cannot set AppUserModelID; without it, Windows 11 Search hides the app.
+    if (-not ("NcsInstallLnk" -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+public static class NcsInstallLnk {
+  [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+  private class ShellLink { }
+  [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+  private interface IShellLinkW {
+    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, IntPtr pfd, uint fFlags);
+    void GetIDList(out IntPtr ppidl);
+    void SetIDList(IntPtr pidl);
+    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxPath);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+    void GetHotkey(out short pwHotkey);
+    void SetHotkey(short wHotkey);
+    void GetShowCmd(out int piShowCmd);
+    void SetShowCmd(int iShowCmd);
+    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+    void Resolve(IntPtr hwnd, uint fFlags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+  }
+  [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+  private interface IPropertyStore {
+    [PreserveSig] int GetCount(out uint cProps);
+    [PreserveSig] int GetAt(uint iProp, out PropertyKey pkey);
+    [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant pv);
+    [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant pv);
+    [PreserveSig] int Commit();
+  }
+  [StructLayout(LayoutKind.Sequential, Pack = 4)]
+  private struct PropertyKey { public Guid fmtid; public uint pid; }
+  [StructLayout(LayoutKind.Sequential)]
+  private struct PropVariant {
+    public ushort vt; public ushort wReserved1; public ushort wReserved2; public ushort wReserved3;
+    public IntPtr pointerValue; public IntPtr extra;
+  }
+  [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant pvar);
+  [DllImport("shell32.dll")] static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+  public static void Write(string lnkPath, string appId, string target, string workDir, string desc, string displayName) {
+    var sl = (IShellLinkW)new ShellLink();
+    sl.SetPath(target);
+    sl.SetWorkingDirectory(workDir);
+    sl.SetDescription(desc);
+    sl.SetIconLocation(target, 0);
+    sl.SetShowCmd(1);
+    var store = (IPropertyStore)sl;
+    Set(store, new PropertyKey { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 }, appId);
+    Set(store, new PropertyKey { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 2 }, "\"" + target + "\"");
+    Set(store, new PropertyKey { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 3 }, target + ",0");
+    Set(store, new PropertyKey { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 4 }, displayName);
+    Set(store, new PropertyKey { fmtid = new Guid("F29F85E0-4FF9-1068-AB91-08002B27B3D9"), pid = 5 }, "NCS;NoClickSwitch;No Click Switch");
+    store.Commit();
+    if (File.Exists(lnkPath)) File.Delete(lnkPath);
+    ((IPersistFile)sl).Save(lnkPath, true);
+    SHChangeNotify(0x08000000, 0x0000, IntPtr.Zero, IntPtr.Zero);
+  }
+  static void Set(IPropertyStore store, PropertyKey key, string value) {
+    var pv = new PropVariant { vt = 31, pointerValue = Marshal.StringToCoTaskMemUni(value) };
+    store.SetValue(ref key, ref pv);
+    PropVariantClear(ref pv);
+  }
+}
+"@
+    }
+    try {
+        [NcsInstallLnk]::Write($LnkPath, $AppId, $ExePath, $InstallDir, "$DisplayName ($ShortName)", $DisplayName)
+    }
+    catch {
+        Write-Info "AppUserModelID not stamped on $(Split-Path $LnkPath -Leaf): $($_.Exception.Message)"
+    }
+}
+
+function Register-AppIdentity {
+    $uninstall = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName"
+    New-Item -Path $uninstall -Force | Out-Null
+    Set-ItemProperty -Path $uninstall -Name DisplayName -Value $DisplayName
+    Set-ItemProperty -Path $uninstall -Name Publisher -Value "william-bohannan"
+    Set-ItemProperty -Path $uninstall -Name InstallLocation -Value $InstallDir
+    Set-ItemProperty -Path $uninstall -Name DisplayIcon -Value "$ExePath,0"
+    Set-ItemProperty -Path $uninstall -Name UninstallString -Value "`"$ExePath`" --uninstall"
+    Set-ItemProperty -Path $uninstall -Name QuietUninstallString -Value "`"$ExePath`" --uninstall"
+    Set-ItemProperty -Path $uninstall -Name HelpLink -Value "https://github.com/$Repo"
+    Set-ItemProperty -Path $uninstall -Name URLInfoAbout -Value "https://noclickswitch.com"
+    Set-ItemProperty -Path $uninstall -Name NoModify -Value 1 -Type DWord
+    Set-ItemProperty -Path $uninstall -Name NoRepair -Value 1 -Type DWord
+
+    foreach ($name in @("$AppName.exe", "ncs.exe")) {
+        $p = "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\$name"
+        New-Item -Path $p -Force | Out-Null
+        New-ItemProperty -Path $p -Name "(default)" -Value $ExePath -PropertyType String -Force | Out-Null
+        Set-ItemProperty -Path $p -Name Path -Value $InstallDir
+    }
+
+    $appClass = "HKCU:\Software\Classes\Applications\$AppName.exe"
+    New-Item -Path $appClass -Force | Out-Null
+    Set-ItemProperty -Path $appClass -Name FriendlyAppName -Value $DisplayName
+    Set-ItemProperty -Path $appClass -Name AppUserModelID -Value "william-bohannan.NoClickSwitch"
+    Write-Ok "Registered for Start Search (ncs / $DisplayName)"
 }
 
 function Remove-LegacyInstall {
@@ -319,6 +442,9 @@ Set-AutoStart
 
 Write-Step "Adding Start Menu shortcut..."
 Install-StartMenuShortcut
+
+Write-Step "Registering app for Start Search..."
+Register-AppIdentity
 
 if (-not $NoStart) {
     Write-Step "Starting $DisplayName ($ShortName)..."

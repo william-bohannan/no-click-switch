@@ -25,10 +25,17 @@ reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v %LEGACY% /f >
 
 echo   Removing Start Menu shortcut...
 set "STARTMENU=%APPDATA%\Microsoft\Windows\Start Menu\Programs"
+del /f /q "%STARTMENU%\No Click Switch (NCS).lnk" >NUL 2>&1
 del /f /q "%STARTMENU%\No Click Switch.lnk" >NUL 2>&1
 del /f /q "%STARTMENU%\NoClickSwitch.lnk" >NUL 2>&1
 del /f /q "%STARTMENU%\NCS.lnk" >NUL 2>&1
 if exist "%STARTMENU%\No Click Switch" rmdir /s /q "%STARTMENU%\No Click Switch" >NUL 2>&1
+
+echo   Removing Start Search registration...
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\%APP%" /f >NUL 2>&1
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\%APP%.exe" /f >NUL 2>&1
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\ncs.exe" /f >NUL 2>&1
+reg delete "HKCU\Software\Classes\Applications\%APP%.exe" /f >NUL 2>&1
 
 if exist "%INSTALL%" (
   echo   Removing %INSTALL%

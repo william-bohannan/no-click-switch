@@ -60,8 +60,22 @@ catch {
     schtasks.exe /Delete /TN $AppName /F 2>$null | Out-Null
 }
 
+# Remove Start Search / Settings registration.
+foreach ($regPath in @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\$AppName.exe",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\ncs.exe",
+        "HKCU:\Software\Classes\Applications\$AppName.exe"
+    )) {
+    if (Test-Path -LiteralPath $regPath) {
+        Remove-Item -LiteralPath $regPath -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "=> Removed $regPath" -ForegroundColor Cyan
+    }
+}
+
 # Remove Start Menu shortcut(s).
 $startMenuCandidates = @(
+    (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$DisplayName ($ShortName).lnk"),
     (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$DisplayName.lnk"),
     (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$AppName.lnk"),
     (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$ShortName.lnk")

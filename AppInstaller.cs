@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace NoClickSwitch;
@@ -21,9 +22,20 @@ internal static class AppInstaller
     /// <summary>Full product display name.</summary>
     public const string DisplayName = "No Click Switch";
 
+    /// <summary>
+    /// Stable identity for Start, Search, and the taskbar. Must be set on both
+    /// the process and the Start Menu shortcut or Windows 11 Search hides the app.
+    /// </summary>
+    public const string AppUserModelId = "william-bohannan.NoClickSwitch";
+
+    public const string UninstallArg = "--uninstall";
+
     public const string GitHubUrl = "https://github.com/william-bohannan/no-click-switch";
     public const string WebsiteUrl = "https://noclickswitch.com";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string UninstallKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\" + AppName;
+    private const string AppPathsKeyRoot = @"Software\Microsoft\Windows\CurrentVersion\App Paths";
+    private const string ApplicationsKeyPath = @"Software\Classes\Applications\" + AppName + ".exe";
 
     public static string InstallDirectory { get; } =
         Path.Combine(
@@ -122,7 +134,7 @@ internal static class AppInstaller
             ?? throw new InvalidOperationException("Could not open HKCU Run key.");
         key.SetValue(AppName, $"\"{InstalledExePath}\"");
 
-        InstallStartMenuShortcut();
+        EnsureShellIntegration();
 
         // PawnIO needs an elevated process; swap Run-key start for a highest-privilege
         // logon task when the addon is already on and this install is elevated.
@@ -132,6 +144,8 @@ internal static class AppInstaller
 
     public static void Uninstall()
     {
+        StopOtherAppProcesses();
+
         // Remove auto-start first.
         try
         {
@@ -146,6 +160,7 @@ internal static class AppInstaller
         TryRemoveElevatedLogonTask();
 
         RemoveStartMenuShortcut();
+        RemoveShellRegistration();
 
         if (!Directory.Exists(InstallDirectory))
             return;
@@ -197,7 +212,41 @@ internal static class AppInstaller
     }
 
     /// <summary>
+    /// Bind this process to <see cref="AppUserModelId"/> before any HWND exists.
+    /// Without this, Windows treats the running app as a raw .exe path and Start
+    /// Search will not show it as an App.
+    /// </summary>
+    public static void BindProcessAppUserModelId()
+    {
+        try
+        {
+            _ = SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    /// <summary>
+    /// Start Menu shortcuts + App Paths + Uninstall entry so Search finds
+    /// "No Click Switch" and "ncs". Safe to call on every launch from the install dir.
+    /// </summary>
+    public static void EnsureShellIntegration()
+    {
+        if (!File.Exists(InstalledExePath))
+            return;
+
+        InstallStartMenuShortcut();
+        RegisterAppPaths();
+        RegisterUninstallKey();
+        RegisterApplicationClass();
+        ShellShortcut.NotifyAssociationChanged();
+    }
+
+    /// <summary>
     /// Current-user Start Menu entry so the app can be relaunched after a crash.
+    /// Filename includes NCS so Start Search matches both "No Click Switch" and "ncs".
     /// </summary>
     public static string StartMenuShortcutPath
     {
@@ -206,7 +255,7 @@ internal static class AppInstaller
             var programs = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
                 "Programs");
-            return Path.Combine(programs, $"{DisplayName}.lnk");
+            return Path.Combine(programs, $"{DisplayName} ({ShortName}).lnk");
         }
     }
 
@@ -214,7 +263,54 @@ internal static class AppInstaller
     {
         try
         {
-            var lnk = StartMenuShortcutPath;
+            WriteStartMenuShortcut(StartMenuShortcutPath, $"{DisplayName} ({ShortName})");
+        }
+        catch
+        {
+            TryWriteStartMenuShortcutFallback(StartMenuShortcutPath);
+        }
+
+        RemoveStaleStartMenuShortcuts();
+    }
+
+    private static void RemoveStaleStartMenuShortcuts()
+    {
+        try
+        {
+            var programs = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                "Programs");
+            var keep = Path.GetFullPath(StartMenuShortcutPath);
+            foreach (var name in new[] { $"{DisplayName}.lnk", $"{ShortName}.lnk", $"{AppName}.lnk" })
+            {
+                var path = Path.GetFullPath(Path.Combine(programs, name));
+                if (string.Equals(path, keep, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    private static void WriteStartMenuShortcut(string lnk, string displayName)
+    {
+        ShellShortcut.Create(
+            lnk,
+            InstalledExePath,
+            InstallDirectory,
+            $"{DisplayName} ({ShortName})",
+            AppUserModelId,
+            displayName);
+    }
+
+    private static void TryWriteStartMenuShortcutFallback(string lnk)
+    {
+        try
+        {
             var dir = Path.GetDirectoryName(lnk);
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
@@ -265,6 +361,105 @@ internal static class AppInstaller
             // best-effort
         }
     }
+
+    private static void RegisterAppPaths()
+    {
+        foreach (var name in new[] { $"{AppName}.exe", "ncs.exe" })
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(Path.Combine(AppPathsKeyRoot, name));
+            if (key is null)
+                continue;
+            key.SetValue(null, InstalledExePath);
+            key.SetValue("Path", InstallDirectory);
+        }
+    }
+
+    private static void RegisterUninstallKey()
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(UninstallKeyPath);
+        if (key is null)
+            return;
+
+        key.SetValue("DisplayName", DisplayName);
+        key.SetValue("DisplayVersion", VersionString);
+        key.SetValue("Publisher", "william-bohannan");
+        key.SetValue("InstallLocation", InstallDirectory);
+        key.SetValue("DisplayIcon", $"{InstalledExePath},0");
+        key.SetValue("UninstallString", $"\"{InstalledExePath}\" {UninstallArg}");
+        key.SetValue("QuietUninstallString", $"\"{InstalledExePath}\" {UninstallArg}");
+        key.SetValue("HelpLink", GitHubUrl);
+        key.SetValue("URLInfoAbout", WebsiteUrl);
+        key.SetValue("NoModify", 1, RegistryValueKind.DWord);
+        key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+    }
+
+    private static void RegisterApplicationClass()
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(ApplicationsKeyPath);
+        if (key is null)
+            return;
+        key.SetValue("FriendlyAppName", DisplayName);
+        key.SetValue("AppUserModelID", AppUserModelId);
+    }
+
+    private static void RemoveShellRegistration()
+    {
+        try
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(UninstallKeyPath, throwOnMissingSubKey: false);
+        }
+        catch { /* best-effort */ }
+
+        try
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(ApplicationsKeyPath, throwOnMissingSubKey: false);
+        }
+        catch { /* best-effort */ }
+
+        foreach (var name in new[] { $"{AppName}.exe", "ncs.exe" })
+        {
+            try
+            {
+                Registry.CurrentUser.DeleteSubKeyTree(Path.Combine(AppPathsKeyRoot, name), throwOnMissingSubKey: false);
+            }
+            catch { /* best-effort */ }
+        }
+
+        try { ShellShortcut.NotifyAssociationChanged(); } catch { /* ignore */ }
+    }
+
+    private static void StopOtherAppProcesses()
+    {
+        try
+        {
+            var self = Environment.ProcessId;
+            foreach (var proc in Process.GetProcessesByName(AppName))
+            {
+                try
+                {
+                    if (proc.Id == self)
+                        continue;
+                    proc.Kill(entireProcessTree: true);
+                    proc.WaitForExit(8000);
+                }
+                catch
+                {
+                    // continue
+                }
+                finally
+                {
+                    proc.Dispose();
+                }
+            }
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID(string appID);
 
     /// <summary>
     /// PawnIO only answers elevated processes. When the addon is on, replace the
