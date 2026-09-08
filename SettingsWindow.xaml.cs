@@ -157,10 +157,7 @@ public partial class SettingsWindow : Window
             TrayCheck.IsChecked = s.ShowTrayIcon;
 
             FlameshotShowCheck.IsChecked = s.AddonFlameshotShowOnBar;
-            if (PawnIoEnableCheck is not null)
-                PawnIoEnableCheck.IsChecked = s.AddonPawnIoEnabled;
             RefreshFlameshotStatus();
-            RefreshPawnIoStatus();
         }
         finally
         {
@@ -225,158 +222,7 @@ public partial class SettingsWindow : Window
         SetPageVisible(PageAddons, tag == "Addons");
 
         if (tag == "Addons")
-        {
             RefreshFlameshotStatus();
-            RefreshPawnIoStatus();
-        }
-    }
-
-    private void RefreshPawnIoStatus()
-    {
-        if (PawnIoStatusText is null || PawnIoInstallButton is null)
-            return;
-
-        PawnIoSetup.InvalidateDeviceProbe();
-        var version = PawnIoSetup.TryGetInstalledVersion();
-        var enabled = PawnIoEnableCheck?.IsChecked == true;
-        var elevated = PawnIoSetup.IsProcessElevated();
-        var canOpen = version is not null && PawnIoSetup.CanOpenDevice();
-
-        if (version is not null && enabled && canOpen)
-            PawnIoStatusText.Text = $"Status: PawnIO {version} installed, enabled, and the driver is open.";
-        else if (version is not null && enabled && !elevated)
-            PawnIoStatusText.Text =
-                $"Status: PawnIO {version} installed and enabled, but this session is not elevated. " +
-                "Tick the box again or use Restart as administrator — CPU package temp stays blank until then.";
-        else if (version is not null && enabled)
-            PawnIoStatusText.Text =
-                $"Status: PawnIO {version} installed and enabled, but the driver device could not be opened. " +
-                "Try Refresh status, reboot, or reinstall PawnIO.";
-        else if (version is not null)
-            PawnIoStatusText.Text = $"Status: PawnIO {version} installed — enable the checkbox to use it.";
-        else
-            PawnIoStatusText.Text = "Status: Not installed. Optional — only needed for desktop CPU package temp.";
-        PawnIoInstallButton.Content = version is not null ? "Reinstall PawnIO" : "Install PawnIO";
-        PawnIoInstallButton.IsEnabled = true;
-        if (PawnIoRestartAdminButton is not null)
-            PawnIoRestartAdminButton.IsEnabled = version is not null && enabled && !canOpen;
-    }
-
-    private async void PawnIoInstall_Click(object sender, RoutedEventArgs e)
-    {
-        var confirm = MessageBox.Show(
-            this,
-            "Install the official signed PawnIO driver?\n\n" +
-            "This is the Defender-safe replacement for WinRing0. " +
-            "Windows will ask for administrator approval.\n\n" +
-            "Source: " + PawnIoSetup.WebsiteUrl,
-            "Install PawnIO",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (confirm != MessageBoxResult.Yes)
-            return;
-
-        PawnIoInstallButton.IsEnabled = false;
-        PawnIoStatusText.Text = "Status: downloading official installer…";
-        try
-        {
-            var ok = await PawnIoSetup.StartOfficialInstallerAsync();
-            if (!ok)
-            {
-                MessageBox.Show(
-                    this,
-                    "Could not start the PawnIO installer.\n\n" +
-                    "Download it yourself from " + PawnIoSetup.WebsiteUrl,
-                    "Install PawnIO",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
-
-            if (PawnIoEnableCheck is not null)
-            {
-                var wasLoading = _loading;
-                _loading = true;
-                PawnIoEnableCheck.IsChecked = true;
-                _loading = wasLoading;
-            }
-            PersistFromUi();
-
-            MessageBox.Show(
-                this,
-                "The PawnIO installer is running.\n\n" +
-                "Finish that UAC prompt. Then No Click Switch will restart as administrator " +
-                "so it can open the driver.",
-                "Install PawnIO",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-
-            TryRestartElevatedForPawnIo();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                this,
-                "PawnIO install failed:\n" + ex.Message + "\n\n" +
-                "Download it yourself from " + PawnIoSetup.WebsiteUrl,
-                "Install PawnIO",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
-        finally
-        {
-            RefreshPawnIoStatus();
-        }
-    }
-
-    private void PawnIoRefresh_Click(object sender, RoutedEventArgs e)
-    {
-        SystemStatsReader.Shared.RetryHardwareMonitor();
-        RefreshPawnIoStatus();
-        if (StatusText is not null)
-        {
-            if (!PawnIoSetup.IsInstalled)
-                StatusText.Text = "PawnIO still not found.";
-            else if (PawnIoSetup.CanOpenDevice())
-                StatusText.Text = "PawnIO driver is open — temperature sampling will use it.";
-            else if (!PawnIoSetup.IsProcessElevated())
-                StatusText.Text = "PawnIO is installed — restart as administrator to read CPU temp.";
-            else
-                StatusText.Text = "PawnIO is installed but the driver device could not be opened.";
-        }
-    }
-
-    private void PawnIoRestartAdmin_Click(object sender, RoutedEventArgs e)
-        => TryRestartElevatedForPawnIo();
-
-    /// <summary>
-    /// Persist, start an elevated instance, then exit this one. UAC is the prompt.
-    /// On cancel the checkbox stays on so they can try again.
-    /// </summary>
-    private void TryRestartElevatedForPawnIo()
-    {
-        if (PawnIoSetup.IsProcessElevated() && PawnIoSetup.CanOpenDevice())
-        {
-            if (StatusText is not null)
-                StatusText.Text = "Already running as administrator.";
-            return;
-        }
-
-        PersistFromUi();
-        if (!PawnIoSetup.TryStartElevatedProcess())
-        {
-            if (StatusText is not null)
-                StatusText.Text = "Elevation cancelled — CPU temp needs an administrator restart.";
-            RefreshPawnIoStatus();
-            return;
-        }
-
-        Application.Current.Shutdown();
-    }
-
-    private void PawnIoWebsite_Click(object sender, RoutedEventArgs e)
-    {
-        PawnIoSetup.OpenWebsite();
     }
 
     private static void SetPageVisible(UIElement? page, bool visible)
@@ -391,12 +237,6 @@ public partial class SettingsWindow : Window
         if (_loading)
             return;
         PersistFromUi();
-        if (sender == PawnIoEnableCheck)
-        {
-            RefreshPawnIoStatus();
-            if (PawnIoEnableCheck.IsChecked == true && !PawnIoSetup.IsProcessElevated())
-                TryRestartElevatedForPawnIo();
-        }
     }
 
     private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -577,7 +417,6 @@ public partial class SettingsWindow : Window
                     : MonitorBarMode.PrimaryOnly,
                 ShowTrayIcon = TrayCheck.IsChecked == true,
                 AddonFlameshotShowOnBar = FlameshotShowCheck is null || FlameshotShowCheck.IsChecked == true,
-                AddonPawnIoEnabled = PawnIoEnableCheck?.IsChecked == true,
             };
 
             AppSettingsStore.Instance.Replace(settings);

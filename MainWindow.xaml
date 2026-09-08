@@ -83,7 +83,7 @@
                     VerticalAlignment="Top"
                     Height="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=TabHeight}"
                     Margin="6,6,0,0">
-            <!-- Hamburger: Settings | Install/Uninstall | app info + links | Close -->
+            <!-- Hamburger: Settings | app info + links | Close -->
             <Button x:Name="MenuButton"
                     Style="{StaticResource ChromeIconButton}"
                     VerticalAlignment="Center"
@@ -109,43 +109,11 @@
                                            VerticalAlignment="Center" />
                             </MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem x:Name="MenuUpgrade"
-                                  Header="Upgrade"
-                                  Visibility="Collapsed"
-                                  Click="MenuUpgrade_Click"
-                                  ToolTip="Download and install the latest release">
-                            <MenuItem.Icon>
-                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
-                                           Text="&#xE777;" FontSize="16"
-                                           VerticalAlignment="Center" />
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        <Separator />
-                        <MenuItem x:Name="MenuInstall"
-                                  Header="Install"
-                                  Click="MenuInstall_Click"
-                                  ToolTip="Install for this user and start with Windows login">
-                            <MenuItem.Icon>
-                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
-                                           Text="&#xE896;" FontSize="16"
-                                           VerticalAlignment="Center" />
-                            </MenuItem.Icon>
-                        </MenuItem>
-                        <MenuItem x:Name="MenuUninstall"
-                                  Header="Uninstall"
-                                  Click="MenuUninstall_Click"
-                                  ToolTip="Remove auto-start and installed files">
-                            <MenuItem.Icon>
-                                <TextBlock FontFamily="{StaticResource FluentIconFont}"
-                                           Text="&#xE74D;" FontSize="16"
-                                           VerticalAlignment="Center" />
-                            </MenuItem.Icon>
-                        </MenuItem>
                         <Separator />
                         <MenuItem x:Name="MenuAppName"
                                   Header="No Click Switch (NCS)"
                                   Click="MenuAppName_Click"
-                                  ToolTip="Check for updates">
+                                  ToolTip="About">
                             <MenuItem.Icon>
                                 <TextBlock FontFamily="{StaticResource FluentIconFont}"
                                            Text="&#xE946;" FontSize="16"

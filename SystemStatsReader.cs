@@ -4,7 +4,6 @@ using System.Management;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
-using LibreHardwareMonitor.Hardware;
 
 namespace NoClickSwitch;
 
@@ -13,25 +12,17 @@ namespace NoClickSwitch;
 /// Use <see cref="Shared"/> so only one sampler runs for every bar.
 ///
 /// Temperature sources, in order:
-/// 1. LibreHardwareMonitor 0.9.6+ via the signed <c>PawnIO</c> driver (no WinRing0).
-/// 2. Windows WMI / ACPI thermal zones (works on many laptops, not this desktop).
-/// 3. nvidia-smi for NVIDIA GPUs.
-///
-/// We never extract WinRing0 / NoClickSwitch.sys — Defender quarantines that as
-/// VulnerableDriver:WinNT/Winring0.
+/// 1. Windows WMI / ACPI thermal zones (works on many laptops).
+/// 2. nvidia-smi for NVIDIA GPUs.
 /// </summary>
 internal sealed class SystemStatsReader : IDisposable
 {
-    /// <summary>Process-wide reader (multiple bars must not each open WMI / LHM).</summary>
+    /// <summary>Process-wide reader (multiple bars must not each open WMI).</summary>
     public static SystemStatsReader Shared { get; } = new();
 
     private readonly object _gate = new();
-    /// <summary>Separate from load/disk so UI sampling never waits on WMI or LHM.</summary>
+    /// <summary>Separate from load/disk so UI sampling never waits on WMI.</summary>
     private readonly object _tempGate = new();
-
-    private Computer? _computer;
-    private bool _lhmOpenAttempted;
-    private DateTime _nextLhmRetryUtc = DateTime.MinValue;
 
     private long _idlePrev;
     private long _kernelPrev;
@@ -221,56 +212,24 @@ internal sealed class SystemStatsReader : IDisposable
         return new DiskSample(letter, pct, tip);
     }
 
-    /// <summary>Re-open LHM after the user installs PawnIO without restarting NCS.</summary>
-    public void RetryHardwareMonitor()
-    {
-        lock (_tempGate)
-        {
-            PawnIoSetup.InvalidateDeviceProbe();
-            _lhmOpenAttempted = false;
-            _nextLhmRetryUtc = DateTime.MinValue;
-            try { _computer?.Close(); } catch { /* ignore */ }
-            _computer = null;
-        }
-    }
-
     private void SampleTemperatures()
     {
-        TryDeleteLegacyWinRing0();
-
         float? cpu = null;
         float? gpu = null;
         string? cpuSource = null;
         string? gpuSource = null;
 
-        EnsureComputer();
-        var lhm = TryReadLhmTemps();
-        if (lhm.Cpu is not null)
+        var wmi = TryReadWmiTemps();
+        if (wmi.Cpu is not null)
         {
-            cpu = lhm.Cpu;
-            cpuSource = lhm.CpuSource;
+            cpu = wmi.Cpu;
+            cpuSource = wmi.CpuSource;
         }
 
-        if (lhm.Gpu is not null)
+        if (wmi.Gpu is not null)
         {
-            gpu = lhm.Gpu;
-            gpuSource = lhm.GpuSource;
-        }
-
-        if (cpu is null || gpu is null)
-        {
-            var wmi = TryReadWmiTemps();
-            if (cpu is null && wmi.Cpu is not null)
-            {
-                cpu = wmi.Cpu;
-                cpuSource = wmi.CpuSource;
-            }
-
-            if (gpu is null && wmi.Gpu is not null)
-            {
-                gpu = wmi.Gpu;
-                gpuSource = wmi.GpuSource;
-            }
+            gpu = wmi.Gpu;
+            gpuSource = wmi.GpuSource;
         }
 
         if (gpu is null)
@@ -327,16 +286,9 @@ internal sealed class SystemStatsReader : IDisposable
         }
         else
         {
-            var blocked = PawnIoSetup.IsEnabled ? PawnIoSetup.DescribeBlockedReason() : null;
             CpuTempToolTip =
                 "CPU temperature: unavailable\n" +
-                (blocked is not null
-                    ? blocked + "\n"
-                    : PawnIoSetup.IsEnabled
-                        ? "PawnIO is enabled but no CPU sensor was found.\n"
-                        : "No Windows thermal-zone reading.\n" +
-                          "For desktop package temp, enable the PawnIO addon\n" +
-                          "(Settings → Addons). We do not use WinRing0.\n") +
+                "No Windows thermal-zone reading.\n" +
                 _tempStatus;
         }
 
@@ -353,300 +305,6 @@ internal sealed class SystemStatsReader : IDisposable
     }
 
     private readonly record struct WmiTemps(float? Cpu, string? CpuSource, float? Gpu, string? GpuSource);
-
-    private void EnsureComputer()
-    {
-        if (_computer is not null)
-            return;
-        if (_lhmOpenAttempted && DateTime.UtcNow < _nextLhmRetryUtc)
-            return;
-
-        _lhmOpenAttempted = true;
-        if (!PawnIoSetup.IsEnabled)
-        {
-            _tempStatus = AppSettingsStore.Instance.Current.AddonPawnIoEnabled
-                ? "PawnIO addon on, driver not installed"
-                : "PawnIO addon off";
-            _nextLhmRetryUtc = DateTime.UtcNow.AddSeconds(30);
-            return;
-        }
-
-        if (!PawnIoSetup.CanOpenDevice())
-        {
-            _tempStatus = PawnIoSetup.DescribeBlockedReason()
-                          ?? "PawnIO device could not be opened";
-            _nextLhmRetryUtc = DateTime.UtcNow.AddSeconds(15);
-            WriteDebugLog(_tempStatus + $" elevated={PawnIoSetup.IsProcessElevated()}");
-            return;
-        }
-
-        try
-        {
-            _computer = new Computer
-            {
-                IsCpuEnabled = true,
-                IsGpuEnabled = true,
-                IsMotherboardEnabled = true,
-                IsControllerEnabled = false,
-                IsMemoryEnabled = false,
-                IsNetworkEnabled = false,
-                IsStorageEnabled = false,
-                IsBatteryEnabled = false,
-                IsPsuEnabled = false,
-            };
-            _computer.Open();
-
-            foreach (var h in _computer.Hardware)
-            {
-                if (IsTempRelevant(h.HardwareType))
-                    UpdateHardwareTree(h);
-            }
-
-            _tempStatus = "LHM/PawnIO open; hardware=" + _computer.Hardware.Count;
-            WriteDebugLog(_tempStatus);
-        }
-        catch (Exception ex)
-        {
-            try { _computer?.Close(); } catch { /* ignore */ }
-            _computer = null;
-            _tempStatus = "LHM/PawnIO open failed: " + ex.GetType().Name + ": " + ex.Message;
-            _nextLhmRetryUtc = DateTime.UtcNow.AddSeconds(30);
-            WriteDebugLog(_tempStatus);
-        }
-    }
-
-    private WmiTemps TryReadLhmTemps()
-    {
-        if (_computer is null)
-            return default;
-
-        try
-        {
-            foreach (var hardware in _computer.Hardware)
-            {
-                if (!IsTempRelevant(hardware.HardwareType))
-                    continue;
-                UpdateHardwareTree(hardware);
-            }
-
-            var bag = new TempBag();
-            var sensorCount = 0;
-            foreach (var hardware in _computer.Hardware)
-            {
-                if (!IsTempRelevant(hardware.HardwareType))
-                    continue;
-                sensorCount += CollectTemps(hardware, bag);
-            }
-
-            var cpu = bag.PickCpu(out var cpuSource);
-            var gpu = bag.PickGpu(out var gpuSource);
-            if (cpu is null && gpu is null)
-                _tempStatus = $"LHM/PawnIO open; sensors={sensorCount}; no CPU/GPU match";
-            return new WmiTemps(cpu, cpuSource is null ? null : "LHM " + cpuSource,
-                gpu, gpuSource is null ? null : "LHM " + gpuSource);
-        }
-        catch (Exception ex)
-        {
-            _tempStatus = "LHM update error: " + ex.GetType().Name;
-            WriteDebugLog(_tempStatus + " " + ex.Message);
-            return default;
-        }
-    }
-
-    private static bool IsTempRelevant(HardwareType type)
-        => type is HardwareType.Cpu
-            or HardwareType.GpuNvidia
-            or HardwareType.GpuAmd
-            or HardwareType.GpuIntel
-            or HardwareType.Motherboard
-            or HardwareType.SuperIO;
-
-    private static void UpdateHardwareTree(IHardware hardware)
-    {
-        hardware.Update();
-        foreach (var sub in hardware.SubHardware)
-            UpdateHardwareTree(sub);
-    }
-
-    private sealed class TempBag
-    {
-        public float? CpuPackage;
-        public string? CpuPackageName;
-        public float? CpuCoreMax;
-        public string? CpuCoreMaxName;
-        public float? CpuCoreAverage;
-        public string? CpuCoreAverageName;
-        public float CpuCoreSum;
-        public int CpuCoreCount;
-        public float? CpuAny;
-        public string? CpuAnyName;
-        public float? Gpu;
-        public string? GpuName;
-
-        public float? PickCpu(out string? source)
-        {
-            if (CpuPackage is float p)
-            {
-                source = CpuPackageName;
-                return p;
-            }
-
-            if (CpuCoreMax is float m)
-            {
-                source = CpuCoreMaxName;
-                return m;
-            }
-
-            if (CpuCoreAverage is float a)
-            {
-                source = CpuCoreAverageName;
-                return a;
-            }
-
-            if (CpuCoreCount > 0)
-            {
-                source = $"average of {CpuCoreCount} cores";
-                return CpuCoreSum / CpuCoreCount;
-            }
-
-            if (CpuAny is float any)
-            {
-                source = CpuAnyName;
-                return any;
-            }
-
-            source = null;
-            return null;
-        }
-
-        public float? PickGpu(out string? source)
-        {
-            source = GpuName;
-            return Gpu;
-        }
-    }
-
-    private static int CollectTemps(IHardware hardware, TempBag bag)
-    {
-        var count = 0;
-        foreach (var sub in hardware.SubHardware)
-            count += CollectTemps(sub, bag);
-
-        var type = hardware.HardwareType;
-        var isCpuHw = type == HardwareType.Cpu;
-        var isGpuHw = type is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel;
-        var isBoardHw = type is HardwareType.Motherboard or HardwareType.SuperIO;
-
-        foreach (var sensor in hardware.Sensors)
-        {
-            if (sensor.SensorType != SensorType.Temperature)
-                continue;
-
-            var raw = sensor.Value;
-            if (raw is null)
-                continue;
-            var value = raw.Value;
-            if (float.IsNaN(value) || float.IsInfinity(value))
-                continue;
-            if (value < 1 || value > 125)
-                continue;
-
-            count++;
-            var name = sensor.Name ?? "";
-            if (name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase)
-                || (name.Contains("TjMax", StringComparison.OrdinalIgnoreCase)
-                    && name.Contains("Distance", StringComparison.OrdinalIgnoreCase)))
-                continue;
-
-            if (isCpuHw || (isBoardHw && LooksLikeCpuSensor(name)))
-            {
-                if (IsPackageName(name))
-                {
-                    if (bag.CpuPackage is null || IsBetterPackageName(name, bag.CpuPackageName))
-                    {
-                        bag.CpuPackage = value;
-                        bag.CpuPackageName = $"{hardware.Name} / {name}";
-                    }
-                }
-                else if (name.Equals("Core Max", StringComparison.OrdinalIgnoreCase)
-                         || name.Equals("CPU Core Max", StringComparison.OrdinalIgnoreCase))
-                {
-                    bag.CpuCoreMax = value;
-                    bag.CpuCoreMaxName = $"{hardware.Name} / {name}";
-                }
-                else if (name.Contains("Core Average", StringComparison.OrdinalIgnoreCase)
-                         || name.Equals("CPU Core Average", StringComparison.OrdinalIgnoreCase))
-                {
-                    bag.CpuCoreAverage = value;
-                    bag.CpuCoreAverageName = $"{hardware.Name} / {name}";
-                }
-                else if (IsCpuCoreSensor(name))
-                {
-                    bag.CpuCoreSum += value;
-                    bag.CpuCoreCount++;
-                    if (bag.CpuAny is null || value > bag.CpuAny)
-                    {
-                        bag.CpuAny = value;
-                        bag.CpuAnyName = $"{hardware.Name} / {name}";
-                    }
-                }
-                else if (bag.CpuAny is null || value > bag.CpuAny)
-                {
-                    bag.CpuAny = value;
-                    bag.CpuAnyName = $"{hardware.Name} / {name}";
-                }
-            }
-            else if (isGpuHw)
-            {
-                var prefer = name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                             || name.Contains("GPU", StringComparison.OrdinalIgnoreCase)
-                             || name.Equals("Temperature", StringComparison.OrdinalIgnoreCase);
-                if (bag.Gpu is null || prefer)
-                {
-                    bag.Gpu = value;
-                    bag.GpuName = $"{hardware.Name} / {name}";
-                }
-            }
-        }
-
-        return count;
-    }
-
-    private static bool LooksLikeCpuSensor(string name)
-        => name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("CCD", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsPackageName(string name)
-        => name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
-           || name.Contains("CCD", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("CPU", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("CPU Temperature", StringComparison.OrdinalIgnoreCase)
-           || (name.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-               && !name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-               && !name.Contains("Distance", StringComparison.OrdinalIgnoreCase));
-
-    private static bool IsBetterPackageName(string candidate, string? current)
-    {
-        if (string.IsNullOrEmpty(current))
-            return true;
-        int Rank(string n) =>
-            n.Contains("Package", StringComparison.OrdinalIgnoreCase) ? 3
-            : n.Contains("Tctl", StringComparison.OrdinalIgnoreCase) || n.Contains("Tdie", StringComparison.OrdinalIgnoreCase) ? 2
-            : 1;
-        return Rank(candidate) >= Rank(current);
-    }
-
-    private static bool IsCpuCoreSensor(string name)
-        => name.Contains("Core", StringComparison.OrdinalIgnoreCase)
-           && !name.Contains("Package", StringComparison.OrdinalIgnoreCase)
-           && !name.Contains("Average", StringComparison.OrdinalIgnoreCase)
-           && !name.Contains("Max", StringComparison.OrdinalIgnoreCase)
-           && !name.Contains("Distance", StringComparison.OrdinalIgnoreCase);
 
     private WmiTemps TryReadWmiTemps()
     {
@@ -748,7 +406,6 @@ internal sealed class SystemStatsReader : IDisposable
 
         if (cpu is null && gpu is null)
         {
-            // Do not clobber a more specific LHM / PawnIO status.
             if (string.IsNullOrEmpty(_tempStatus)
                 || _tempStatus.StartsWith("CPU temperature", StringComparison.OrdinalIgnoreCase))
                 _tempStatus = "No Windows thermal-zone reading";
@@ -892,30 +549,6 @@ internal sealed class SystemStatsReader : IDisposable
         return null;
     }
 
-    /// <summary>
-    /// Older builds extracted WinRing0 next to the exe as NoClickSwitch.sys.
-    /// Delete leftovers so Defender does not keep rediscovering them.
-    /// Never recreate the file.
-    /// </summary>
-    private static void TryDeleteLegacyWinRing0()
-    {
-        foreach (var dir in new[] { AppContext.BaseDirectory, AppInstaller.InstallDirectory })
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(dir))
-                    continue;
-                var sys = Path.Combine(dir, "NoClickSwitch.sys");
-                if (File.Exists(sys))
-                    File.Delete(sys);
-            }
-            catch
-            {
-                // Defender may already have it locked or quarantined.
-            }
-        }
-    }
-
     private void WriteDebugLog(string line)
     {
         try
@@ -964,11 +597,7 @@ internal sealed class SystemStatsReader : IDisposable
     /// <summary>Called once when the app exits.</summary>
     public static void ShutdownShared()
     {
-        lock (Shared._tempGate)
-        {
-            try { Shared._computer?.Close(); } catch { /* ignore */ }
-            Shared._computer = null;
-        }
+        // Shared lives for the process; WMI / nvidia-smi need no teardown.
     }
 
     private static string FormatBytes(ulong bytes)

@@ -52,3 +52,17 @@ Desktop.ini
 *.local
 .env
 .env.*
+
+## MSIX packaging output
+Package/layout/
+Package/out/
+Package/.tools/
+*.msix
+*.msixbundle
+*.msixupload
+*.appx
+*.appxbundle
+*.appxupload
+*.appxsym
+*.cer
+*.pfx

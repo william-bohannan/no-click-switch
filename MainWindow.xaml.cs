@@ -254,10 +254,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         AppSettingsStore.Instance.Changed += (_, _) =>
             Dispatcher.Invoke(ApplySettings);
-
-        // Update check result may arrive after the menu was last opened.
-        AppUpdateChecker.Changed += (_, _) =>
-            Dispatcher.BeginInvoke(RefreshAppMenu, DispatcherPriority.Background);
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -290,13 +286,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             PositionAsTopBar();
             SyncBarHeight(animate: false);
         }, DispatcherPriority.Loaded);
-
-        // Primary bar only: check GitHub for a newer release (throttled).
-        if (IsPrimaryBar)
-        {
-            Dispatcher.BeginInvoke(() => AppUpdateChecker.CheckInBackground(force: true),
-                DispatcherPriority.ApplicationIdle);
-        }
 
         _refreshTimer.Start();
         _clockTimer.Start();
@@ -2018,8 +2007,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (menu.IsOpen)
                 return;
 
-            // Refresh upgrade availability when the menu is used (async; safe).
-            AppUpdateChecker.CheckInBackground(force: false);
             RefreshAppMenu();
 
             menu.PlacementTarget = MenuButton;
@@ -2194,18 +2181,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RefreshAppMenu()
     {
-        if (MenuInstall is null)
-            return;
-
-        var installed = AppInstaller.IsInstalled;
-        MenuInstall.Visibility = installed ? Visibility.Collapsed : Visibility.Visible;
-        if (MenuUninstall is not null)
-            MenuUninstall.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
         if (MenuAppName is not null)
         {
             MenuAppName.Header = $"{AppInstaller.DisplayName} ({AppInstaller.ShortName})";
-            MenuAppName.ToolTip = "Check for updates";
-            MenuAppName.IsEnabled = true;
+            MenuAppName.ToolTip = "About";
         }
         if (MenuVersion is not null)
             MenuVersion.Header = $"Version {AppInstaller.VersionString}";
@@ -2220,144 +2199,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             MenuWebsite.Header = "Website";
             MenuWebsite.ToolTip = AppInstaller.WebsiteUrl;
         }
-
-        if (MenuUpgrade is null)
-            return;
-
-        if (AppUpdateChecker.IsUpdateAvailable
-            && AppUpdateChecker.AvailableVersion is { } remote)
-        {
-            MenuUpgrade.Visibility = Visibility.Visible;
-            MenuUpgrade.Header = $"Upgrade to {remote}";
-            MenuUpgrade.ToolTip =
-                $"Install {AppUpdateChecker.AvailableTag ?? remote} (current: {AppInstaller.VersionString})";
-        }
-        else
-        {
-            MenuUpgrade.Visibility = Visibility.Collapsed;
-            MenuUpgrade.Header = "Upgrade";
-        }
     }
 
-    private async void MenuAppName_Click(object sender, RoutedEventArgs e)
+    private void MenuAppName_Click(object sender, RoutedEventArgs e)
     {
-        if (MenuAppName is not null)
-        {
-            MenuAppName.IsEnabled = false;
-            MenuAppName.ToolTip = "Checking for updates…";
-        }
-        if (MenuVersion is not null)
-            MenuVersion.Header = "Checking for updates…";
-
-        try
-        {
-            // Explicit user request — always hit GitHub (not the 30‑minute throttle).
-            await AppUpdateChecker.CheckAsync().ConfigureAwait(true);
-            RefreshAppMenu();
-
-            if (AppUpdateChecker.IsUpdateAvailable
-                && AppUpdateChecker.AvailableVersion is { } remote)
-            {
-                var tag = AppUpdateChecker.AvailableTag ?? remote;
-                var upgrade = MessageBox.Show(
-                    $"A newer version is available: {tag}\n\n" +
-                    $"(Current: {AppInstaller.VersionString})\n\n" +
-                    "Upgrade now?",
-                    AppInstaller.DisplayName,
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Information);
-
-                if (upgrade == MessageBoxResult.Yes)
-                    await RunUpgradeAsync(sender as MenuItem).ConfigureAwait(true);
-            }
-            else
-            {
-                MessageBox.Show(
-                    $"You're up to date.\n\nCurrent version: {AppInstaller.VersionString}",
-                    AppInstaller.DisplayName,
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                "Could not check for updates.\n\n" +
-                $"{ex.Message}\n\n" +
-                "Check your network connection, or open GitHub from this menu.",
-                AppInstaller.DisplayName,
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            RefreshAppMenu();
-        }
-        finally
-        {
-            if (MenuAppName is not null)
-            {
-                MenuAppName.IsEnabled = true;
-                MenuAppName.ToolTip = "Check for updates";
-            }
-        }
-    }
-
-    private async void MenuUpgrade_Click(object sender, RoutedEventArgs e)
-    {
-        var remote = AppUpdateChecker.AvailableVersion ?? "latest";
-        var result = MessageBox.Show(
-            $"Upgrade {AppInstaller.DisplayName} to {remote}?\n\n" +
-            "This downloads the official GitHub release zip in-app, " +
-            "then a local .cmd helper replaces files and restarts (no PowerShell).\n\n" +
-            $"(Current version: {AppInstaller.VersionString})\n\n" +
-            "Note: Windows SmartScreen may still warn about an unsigned app — " +
-            "choose More info → Run anyway if you trust this project.",
-            "Upgrade",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-
-        if (result != MessageBoxResult.Yes)
-            return;
-
-        await RunUpgradeAsync(sender as MenuItem).ConfigureAwait(true);
-    }
-
-    private async Task RunUpgradeAsync(MenuItem? sourceMenuItem)
-    {
-        if (sourceMenuItem is not null)
-            sourceMenuItem.IsEnabled = false;
-
-        try
-        {
-            var progress = new Progress<string>(msg =>
-            {
-                // Best-effort status via menu tooltip while download runs.
-                if (MenuUpgrade is not null)
-                    MenuUpgrade.ToolTip = msg;
-                if (MenuAppName is not null)
-                    MenuAppName.ToolTip = msg;
-            });
-
-            await AppUpdateChecker.StartUpgradeAsync(progress).ConfigureAwait(true);
-            // App shuts down when staging succeeds.
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                "Upgrade failed.\n\n" +
-                $"{ex.Message}\n\n" +
-                "Manual install (if needed):\n" +
-                "  irm https://raw.githubusercontent.com/william-bohannan/no-click-switch/main/install.ps1 | iex\n" +
-                "or download NoClickSwitch-win-x64.zip from GitHub Releases and extract to\n" +
-                "%LocalAppData%\\NoClickSwitch.\n\n" +
-                "If Windows blocked the download, check Defender protection history " +
-                "and allow No Click Switch / the zip from github.com.",
-                AppInstaller.DisplayName,
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-
-            if (sourceMenuItem is not null)
-                sourceMenuItem.IsEnabled = true;
-            RefreshAppMenu();
-        }
+        MessageBox.Show(
+            $"{AppInstaller.DisplayName} {AppInstaller.VersionString}\n\n" +
+            "Updates are delivered by Microsoft Store.",
+            AppInstaller.DisplayName,
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 
     private void MenuClose_Click(object sender, RoutedEventArgs e)
@@ -2527,68 +2378,4 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void MenuInstall_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            AppInstaller.Install();
-            MessageBox.Show(
-                $"Installed for this user.\n\n{AppInstaller.DisplayName} ({AppInstaller.ShortName}) will start automatically when you sign in to Windows.",
-                AppInstaller.DisplayName,
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Install failed.\n\n{ex.Message}",
-                AppInstaller.DisplayName,
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
-    }
-
-    private void MenuUninstall_Click(object sender, RoutedEventArgs e)
-    {
-        var result = MessageBox.Show(
-            $"Uninstall {AppInstaller.DisplayName} ({AppInstaller.ShortName}) for this user?\n\nThis removes auto-start and installed files.",
-            AppInstaller.DisplayName,
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-
-        if (result != MessageBoxResult.Yes)
-            return;
-
-        try
-        {
-            var runningFromInstall = AppInstaller.IsRunningFromInstallLocation();
-            AppInstaller.Uninstall();
-
-            if (runningFromInstall)
-            {
-                MessageBox.Show(
-                    $"Uninstall started. {AppInstaller.DisplayName} will close now.",
-                    AppInstaller.DisplayName,
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-                Close();
-            }
-            else
-            {
-                MessageBox.Show(
-                    "Uninstalled. Auto-start and installed files have been removed.",
-                    AppInstaller.DisplayName,
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Uninstall failed.\n\n{ex.Message}",
-                AppInstaller.DisplayName,
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
-    }
 }

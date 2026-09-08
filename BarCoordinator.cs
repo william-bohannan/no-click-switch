@@ -15,7 +15,6 @@ internal sealed class BarCoordinator
     private HotkeyService? _hotkeys;
     private bool _barsVisible = true;
     private MonitorBarMode _lastMonitorMode;
-    private bool _lastPawnIoEnabled;
     private bool _started;
 
     public IReadOnlyList<MainWindow> Bars => _bars;
@@ -29,9 +28,6 @@ internal sealed class BarCoordinator
         _started = true;
 
         _lastMonitorMode = AppSettingsStore.Instance.Current.MonitorMode;
-        _lastPawnIoEnabled = AppSettingsStore.Instance.Current.AddonPawnIoEnabled;
-        if (_lastPawnIoEnabled && PawnIoSetup.IsProcessElevated())
-            AppInstaller.SyncLogonStart(elevate: true);
 
         // Enable taskbar auto-hide once for the whole session (not per-bar Loaded/Closed).
         // Bar rebuilds used to Close() the owner and flip auto-hide off on multi-monitor.
@@ -182,12 +178,6 @@ internal sealed class BarCoordinator
             var s = AppSettingsStore.Instance.Current;
             ApplyTrayVisibility();
             _hotkeys?.ApplyFromSettings();
-            if (s.AddonPawnIoEnabled != _lastPawnIoEnabled)
-            {
-                _lastPawnIoEnabled = s.AddonPawnIoEnabled;
-                SystemStatsReader.Shared.RetryHardwareMonitor();
-                AppInstaller.SyncLogonStart(elevate: s.AddonPawnIoEnabled && PawnIoSetup.IsProcessElevated());
-            }
 
             if (s.MonitorMode != _lastMonitorMode)
             {

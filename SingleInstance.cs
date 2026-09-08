@@ -9,9 +9,8 @@ namespace NoClickSwitch;
 
 /// <summary>
 /// One live process per user session. A second Start Menu / Run / logon launch
-/// activates the existing bars instead of stacking another set. An elevated
-/// launch (PawnIO) or <see cref="ReplaceArg"/> asks the current process to
-/// exit so the new one can take over.
+/// activates the existing bars instead of stacking another set. <see cref="ReplaceArg"/>
+/// asks the current process to exit so a new one can take over.
 /// </summary>
 internal static class SingleInstance
 {
@@ -47,7 +46,7 @@ internal static class SingleInstance
             }
 
             // Create() with initiallyOwned does not take a pre-existing mutex.
-            if (replace || PawnIoSetup.IsProcessElevated())
+            if (replace)
             {
                 try { _exit.Set(); } catch { /* other process may be exiting */ }
                 if (WaitTakeover(TimeSpan.FromSeconds(10)))
@@ -65,9 +64,9 @@ internal static class SingleInstance
         catch (UnauthorizedAccessException)
         {
             // Cross-integrity open denied — treat as already running.
-            if (replace || PawnIoSetup.IsProcessElevated())
+            if (replace)
                 TryKillOtherProcesses();
-            return replace || PawnIoSetup.IsProcessElevated();
+            return replace;
         }
         catch
         {

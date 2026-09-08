@@ -12,13 +12,6 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        if (e.Args.Any(a => string.Equals(a, AppInstaller.UninstallArg, StringComparison.OrdinalIgnoreCase)))
-        {
-            try { AppInstaller.Uninstall(); } catch { /* best-effort */ }
-            Shutdown();
-            return;
-        }
-
         if (!SingleInstance.TryEnter(e.Args))
         {
             Shutdown();
@@ -26,12 +19,6 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
-
-        if (AppInstaller.IsRunningFromInstallLocation())
-        {
-            try { AppInstaller.EnsureShellIntegration(); }
-            catch { /* Start Menu registration is best-effort */ }
-        }
 
         // Bars, tray, and hotkeys are owned by the coordinator (not StartupUri).
         BarCoordinator.Instance.Start();
