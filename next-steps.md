@@ -45,30 +45,17 @@ Commit the updated `identity.json` after you paste the real values.
 
 ## 4. Prepare the Store listing
 
-You will need these in the submission. Capture them before you click submit.
+Draft copy, logos, screenshots, and a privacy policy are in **[store/](store/README.md)**. Paste from `store/listing.md` and upload the PNGs.
 
 **Screenshots** (required)
 
-- At least **one** screenshot; more is better (hover-to-switch, settings, multi-monitor).
+- At least **one**; four 1920×1080 mockups are in `store/screenshots/`.
 - Size: **1366×768** or **1920×1080** (Windows 11 Store).
-- Show the top bar on a normal desktop, not a debug `dotnet run` window.
+- After sideload, you can replace mockups with live captures.
 
-**Text**
+**Text** — see `store/listing.md` (description, search terms, captions).
 
-- Short description (first lines of the Store card).
-- Full description (you can adapt the Behaviour list in `README.md`).
-- Search terms: `window switcher`, `taskbar`, `alt tab`, `NCS`, `always on top`.
-- Category: **Productivity** (or Utilities, if that is what Partner Center shows).
-- Support contact email.
-- Website: `https://noclickswitch.com` (or the GitHub repo until the site is live).
-
-**Privacy policy URL**
-
-Partner Center usually requires a public privacy policy even if you collect nothing. Host a short page (GitHub, the website, or a gist) that says:
-
-- No accounts, no telemetry, no advertising.
-- Settings stay on the device (`%LocalAppData%\NoClickSwitch\settings.json`).
-- Optional Flameshot install uses the user’s existing `winget` / Chocolatey.
+**Privacy policy URL** — host `store/privacy.md` over HTTPS (GitHub Pages, the website, or similar), then paste that URL.
 
 **Age rating**
 
